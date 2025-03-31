@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit } from 'lucide-react';
+import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit, Check, X } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Task, MedicalOrganization, getAllTasks, getMedicalOrganizationById, deleteTask, updateTaskMoStatus } from '@/lib/db';

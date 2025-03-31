@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { MedicalOrganization, TaskStatus, createTask, updateTask } from '@/lib/db';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface TaskFormProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface TaskFormProps {
   organizations: MedicalOrganization[];
   taskToEdit?: any;
   onTaskAdded?: () => void;
+  allowMultipleOrganizations?: boolean;
 }
 
 const TaskForm: React.FC<TaskFormProps> = ({ 
@@ -29,13 +31,15 @@ const TaskForm: React.FC<TaskFormProps> = ({
   onClose, 
   organizations,
   taskToEdit,
-  onTaskAdded
+  onTaskAdded,
+  allowMultipleOrganizations = false
 }) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [moId, setMoId] = useState<string>('');
+  const [selectedMoIds, setSelectedMoIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState<Date | undefined>(new Date());
   const [endDate, setEndDate] = useState<Date | undefined>(new Date());
   const [completionPercentage, setCompletionPercentage] = useState<number>(0);
@@ -54,6 +58,14 @@ const TaskForm: React.FC<TaskFormProps> = ({
       setStatus(taskToEdit.status || TaskStatus.NotStarted);
       setResult(taskToEdit.result || '');
       setComment(taskToEdit.comment || '');
+      
+      // Initialize selected MO IDs if task has moStatuses
+      if (taskToEdit.moStatuses && taskToEdit.moStatuses.length > 0) {
+        const ids = taskToEdit.moStatuses.map((status: any) => status.moId.toString());
+        setSelectedMoIds(ids);
+      } else {
+        setSelectedMoIds([taskToEdit.moId.toString()]);
+      }
     } else {
       resetForm();
     }
@@ -63,6 +75,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
     setTitle('');
     setDescription('');
     setMoId('');
+    setSelectedMoIds([]);
     setStartDate(new Date());
     setEndDate(new Date());
     setCompletionPercentage(0);
@@ -74,7 +87,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!startDate || !endDate || !moId) {
+    if (!startDate || !endDate || (!moId && selectedMoIds.length === 0)) {
       toast({
         title: "Ошибка",
         description: "Пожалуйста, заполните все обязательные поля",
@@ -84,10 +97,9 @@ const TaskForm: React.FC<TaskFormProps> = ({
     }
 
     try {
-      const taskData = {
+      const baseTaskData = {
         title,
         description,
-        moId: parseInt(moId),
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
         assignedBy: user?.username || 'Гость',
@@ -97,18 +109,52 @@ const TaskForm: React.FC<TaskFormProps> = ({
         comment,
       };
 
-      if (taskToEdit) {
-        await updateTask(taskToEdit.id, taskData);
-        toast({
-          title: "Задача обновлена",
-          description: "Задача успешно обновлена",
-        });
+      if (allowMultipleOrganizations && selectedMoIds.length > 0) {
+        // For multiple MOs
+        const primaryMoId = parseInt(selectedMoIds[0]);
+        const taskData = {
+          ...baseTaskData,
+          moId: primaryMoId,
+          moStatuses: selectedMoIds.map(id => ({
+            moId: parseInt(id),
+            completionPercentage: 0,
+            comment: ''
+          }))
+        };
+
+        if (taskToEdit) {
+          await updateTask(taskToEdit.id, taskData);
+          toast({
+            title: "Задача обновлена",
+            description: "Задача успешно обновлена",
+          });
+        } else {
+          await createTask(taskData);
+          toast({
+            title: "Задача создана",
+            description: "Задача успешно создана",
+          });
+        }
       } else {
-        await createTask(taskData);
-        toast({
-          title: "Задача создана",
-          description: "Задача успешно создана",
-        });
+        // For single MO
+        const taskData = {
+          ...baseTaskData,
+          moId: parseInt(moId),
+        };
+
+        if (taskToEdit) {
+          await updateTask(taskToEdit.id, taskData);
+          toast({
+            title: "Задача обновлена",
+            description: "Задача успешно обновлена",
+          });
+        } else {
+          await createTask(taskData);
+          toast({
+            title: "Задача создана",
+            description: "Задача успешно создана",
+          });
+        }
       }
 
       if (onTaskAdded) {
@@ -125,6 +171,25 @@ const TaskForm: React.FC<TaskFormProps> = ({
         variant: "destructive",
       });
     }
+  };
+
+  const toggleMoSelection = (moId: string) => {
+    setSelectedMoIds(prev => {
+      if (prev.includes(moId)) {
+        return prev.filter(id => id !== moId);
+      } else {
+        return [...prev, moId];
+      }
+    });
+  };
+
+  const selectAllMos = () => {
+    const allMoIds = organizations.map(org => org.id?.toString() || '').filter(id => id !== '');
+    setSelectedMoIds(allMoIds);
+  };
+
+  const deselectAllMos = () => {
+    setSelectedMoIds([]);
   };
 
   return (
@@ -149,28 +214,76 @@ const TaskForm: React.FC<TaskFormProps> = ({
                 required
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="mo">Медицинская организация</Label>
-              <Select
-                value={moId}
-                onValueChange={setMoId}
-                required
-              >
-                <SelectTrigger id="mo">
-                  <SelectValue placeholder="Выберите организацию" />
-                </SelectTrigger>
-                <SelectContent>
-                  {organizations.map((org) => (
-                    <SelectItem 
-                      key={org.id} 
-                      value={org.id !== undefined ? org.id.toString() : 'unknown'} // Ensure we never pass empty string
+            
+            {allowMultipleOrganizations ? (
+              <div className="grid gap-2">
+                <Label>Медицинские организации</Label>
+                <div className="border p-4 rounded-md max-h-60 overflow-y-auto">
+                  <div className="flex justify-between mb-2">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={selectAllMos}
                     >
-                      {org.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                      Выбрать все
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={deselectAllMos}
+                    >
+                      Снять выбор
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {organizations.map((org) => (
+                      <div key={org.id} className="flex items-center space-x-2">
+                        <Checkbox 
+                          id={`mo-${org.id}`} 
+                          checked={selectedMoIds.includes(org.id?.toString() || '')}
+                          onCheckedChange={() => toggleMoSelection(org.id?.toString() || '')}
+                        />
+                        <Label 
+                          htmlFor={`mo-${org.id}`}
+                          className="cursor-pointer"
+                        >
+                          {org.name}
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {selectedMoIds.length === 0 && (
+                  <p className="text-sm text-destructive">Выберите хотя бы одну организацию</p>
+                )}
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <Label htmlFor="mo">Медицинская организация</Label>
+                <Select
+                  value={moId}
+                  onValueChange={setMoId}
+                  required
+                >
+                  <SelectTrigger id="mo">
+                    <SelectValue placeholder="Выберите организацию" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {organizations.map((org) => (
+                      <SelectItem 
+                        key={org.id} 
+                        value={org.id !== undefined ? org.id.toString() : 'unknown'} // Ensure we never pass empty string
+                      >
+                        {org.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
             <div className="grid gap-2">
               <Label htmlFor="description">Описание задачи</Label>
               <Textarea
@@ -180,6 +293,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
                 rows={3}
               />
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Дата начала</Label>
