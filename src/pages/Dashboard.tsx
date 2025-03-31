@@ -30,6 +30,7 @@ const Dashboard: React.FC = () => {
     inProgress: 0,
     overdue: 0
   });
+  const [currentTab, setCurrentTab] = useState('organizations');
 
   useEffect(() => {
     loadOrganizations();
@@ -120,18 +121,18 @@ const Dashboard: React.FC = () => {
     <MainLayout>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Система мониторинга задач</h1>
-        {user?.isAdmin && (
-          <div className="flex space-x-2">
-            <Button onClick={handleCreateTask}>
-              <Plus className="mr-2 h-4 w-4" />
-              Новая задача
-            </Button>
+        <div className="flex space-x-2">
+          <Button onClick={handleCreateTask}>
+            <Plus className="mr-2 h-4 w-4" />
+            Новая задача
+          </Button>
+          {user?.isAdmin && (
             <Button variant="outline" onClick={handleCreateBulkTasks}>
               <UserPlus className="mr-2 h-4 w-4" />
               Массовое создание
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4 mb-6">
@@ -182,7 +183,7 @@ const Dashboard: React.FC = () => {
         </Card>
       </div>
 
-      <Tabs defaultValue="organizations" className="space-y-4">
+      <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="organizations">По организациям</TabsTrigger>
           <TabsTrigger value="list">Список задач</TabsTrigger>

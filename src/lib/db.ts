@@ -19,11 +19,18 @@ export interface MedicalOrganization {
   name: string;
 }
 
+export interface TaskMoStatus {
+  moId: number;
+  completionPercentage: number;
+  comment?: string;
+  lastUpdated: string;
+}
+
 export interface Task {
   id?: number;
   title: string;
   description: string;
-  moId: number;
+  moId: number; // Основная МО, для обратной совместимости
   startDate: string;
   endDate: string;
   assignedBy: string;
@@ -31,6 +38,7 @@ export interface Task {
   status: TaskStatus;
   result?: string;
   comment?: string;
+  moStatuses?: TaskMoStatus[]; // Статусы выполнения по каждой МО
 }
 
 interface TaskDB extends DBSchema {
@@ -382,20 +390,41 @@ export const getTasksByMoId = async (moId: number): Promise<Task[]> => {
 
 export const createTask = async (taskData: Omit<Task, 'id'>): Promise<Task> => {
   await initDb();
-  const id = await db.add('tasks', taskData as Task);
-  return { ...taskData, id };
+  
+  // Добавляем статусы для медорганизаций, если их еще нет
+  let finalTaskData = { ...taskData };
+  
+  if (!finalTaskData.moStatuses) {
+    finalTaskData.moStatuses = [{
+      moId: finalTaskData.moId,
+      completionPercentage: finalTaskData.completionPercentage || 0,
+      lastUpdated: new Date().toISOString()
+    }];
+  }
+  
+  const id = await db.add('tasks', finalTaskData as Task);
+  return { ...finalTaskData, id };
 };
 
 export const createBulkTasks = async (taskTemplate: Omit<Task, 'id' | 'moId'>, moIds: number[]): Promise<Task[]> => {
   await initDb();
   const createdTasks: Task[] = [];
   
-  // Create tasks for each selected MO
-  for (const moId of moIds) {
-    const taskData = { ...taskTemplate, moId };
-    const id = await db.add('tasks', taskData as Task);
-    createdTasks.push({ ...taskData, id });
-  }
+  const moStatuses: TaskMoStatus[] = moIds.map(moId => ({
+    moId,
+    completionPercentage: 0,
+    lastUpdated: new Date().toISOString()
+  }));
+  
+  // Создаем одну задачу со статусами для всех выбранных МО
+  const taskData = { 
+    ...taskTemplate, 
+    moId: moIds[0], // Используем первую МО как основную
+    moStatuses 
+  };
+  
+  const id = await db.add('tasks', taskData as Task);
+  createdTasks.push({ ...taskData, id });
   
   return createdTasks;
 };
@@ -410,8 +439,47 @@ export const updateTask = async (id: number, taskData: Partial<Omit<Task, 'id'>>
   return updatedTask;
 };
 
+export const updateTaskMoStatus = async (
+  taskId: number, 
+  moId: number, 
+  status: Partial<Omit<TaskMoStatus, 'moId'>>
+): Promise<Task> => {
+  await initDb();
+  const task = await getTaskById(taskId);
+  if (!task) throw new Error(`Task with id ${taskId} not found`);
+  
+  const moStatuses = task.moStatuses || [];
+  const moStatusIndex = moStatuses.findIndex(s => s.moId === moId);
+  
+  if (moStatusIndex >= 0) {
+    moStatuses[moStatusIndex] = {
+      ...moStatuses[moStatusIndex],
+      ...status,
+      lastUpdated: new Date().toISOString()
+    };
+  } else {
+    moStatuses.push({
+      moId,
+      completionPercentage: status.completionPercentage || 0,
+      comment: status.comment,
+      lastUpdated: new Date().toISOString()
+    });
+  }
+  
+  // Обновляем общий процент выполнения задачи
+  const avgCompletion = moStatuses.reduce((sum, s) => sum + s.completionPercentage, 0) / moStatuses.length;
+  
+  const updatedTask = { 
+    ...task, 
+    moStatuses,
+    completionPercentage: Math.round(avgCompletion)
+  };
+  
+  await db.put('tasks', updatedTask);
+  return updatedTask;
+};
+
 export const deleteTask = async (id: number): Promise<void> => {
   await initDb();
   await db.delete('tasks', id);
 };
-

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pencil, Trash, Plus, Search, FilterX } from 'lucide-react';
+import { Pencil, Trash, Plus, Search, FilterX, Eye } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Task, MedicalOrganization, getAllTasks, getMedicalOrganizationById, deleteTask } from '@/lib/db';
@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth-context';
+import TaskDetailsModal from './TaskDetailsModal';
 
 interface TaskListProps {
   organizations: MedicalOrganization[];
@@ -36,6 +37,8 @@ const TaskList: React.FC<TaskListProps> = ({
   const [selectedMo, setSelectedMo] = useState<string>('all');
   const [organizationNames, setOrganizationNames] = useState<Record<number, string>>({});
   const [taskToDelete, setTaskToDelete] = useState<number | null>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
 
   useEffect(() => {
     loadTasks();
@@ -76,7 +79,17 @@ const TaskList: React.FC<TaskListProps> = ({
     let filtered = [...tasks];
 
     if (selectedMo && selectedMo !== 'all') {
-      filtered = filtered.filter(task => task.moId === parseInt(selectedMo));
+      filtered = filtered.filter(task => {
+        // Проверяем основную МО
+        if (task.moId === parseInt(selectedMo)) return true;
+        
+        // Или проверяем МО в статусах
+        if (task.moStatuses) {
+          return task.moStatuses.some(status => status.moId === parseInt(selectedMo));
+        }
+        
+        return false;
+      });
     }
 
     if (searchTerm.trim()) {
@@ -136,6 +149,15 @@ const TaskList: React.FC<TaskListProps> = ({
     } else {
       return <Badge variant="outline">В процессе</Badge>;
     }
+  };
+
+  const handleViewTaskDetails = (task: Task) => {
+    setSelectedTask(task);
+    setIsDetailsModalOpen(true);
+  };
+
+  const handleTaskUpdated = () => {
+    loadTasks();
   };
 
   return (
@@ -201,23 +223,33 @@ const TaskList: React.FC<TaskListProps> = ({
                   <TableHead>Прогресс</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead>Постановщик</TableHead>
-                  {user?.isAdmin && <TableHead>Действия</TableHead>}
+                  <TableHead>Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredTasks.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={user?.isAdmin ? 8 : 7} className="text-center py-6 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-6 text-muted-foreground">
                       Задачи не найдены
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredTasks.map((task) => {
                     const daysLeft = calculateDaysLeft(task.endDate);
+                    const hasMultipleOrgs = task.moStatuses && task.moStatuses.length > 1;
+                    
                     return (
-                      <TableRow key={task.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onTaskEdit(task)}>
+                      <TableRow key={task.id}>
                         <TableCell className="font-medium">{task.title}</TableCell>
-                        <TableCell>{organizationNames[task.moId] || 'Неизвестно'}</TableCell>
+                        <TableCell>
+                          {hasMultipleOrgs ? (
+                            <Badge variant="outline" className="cursor-help" title="Несколько организаций">
+                              {task.moStatuses!.length} МО
+                            </Badge>
+                          ) : (
+                            organizationNames[task.moId] || 'Неизвестно'
+                          )}
+                        </TableCell>
                         <TableCell>{format(new Date(task.startDate), 'dd.MM.yyyy', { locale: ru })}</TableCell>
                         <TableCell>{format(new Date(task.endDate), 'dd.MM.yyyy', { locale: ru })}</TableCell>
                         <TableCell>
@@ -228,30 +260,37 @@ const TaskList: React.FC<TaskListProps> = ({
                         </TableCell>
                         <TableCell>{getStatusBadge(task)}</TableCell>
                         <TableCell>{task.assignedBy}</TableCell>
-                        {user?.isAdmin && (
-                          <TableCell className="space-x-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTaskEdit(task);
-                              }}
-                            >
-                              <Pencil size={16} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setTaskToDelete(task.id || null);
-                              }}
-                            >
-                              <Trash size={16} />
-                            </Button>
-                          </TableCell>
-                        )}
+                        <TableCell className="space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleViewTaskDetails(task)}
+                            title="Просмотреть детали"
+                          >
+                            <Eye size={16} />
+                          </Button>
+                          
+                          {user?.isAdmin && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => onTaskEdit(task)}
+                                title="Редактировать"
+                              >
+                                <Pencil size={16} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setTaskToDelete(task.id || null)}
+                                title="Удалить"
+                              >
+                                <Trash size={16} />
+                              </Button>
+                            </>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -278,6 +317,14 @@ const TaskList: React.FC<TaskListProps> = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <TaskDetailsModal
+        isOpen={isDetailsModalOpen}
+        onClose={() => setIsDetailsModalOpen(false)}
+        task={selectedTask}
+        organizations={organizations}
+        onTaskUpdated={handleTaskUpdated}
+      />
     </>
   );
 };
