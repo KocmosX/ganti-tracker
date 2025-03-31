@@ -3,19 +3,25 @@ import React, { useState, useEffect } from 'react';
 import MainLayout from '@/components/layout/MainLayout';
 import TaskList from '@/components/tasks/TaskList';
 import TaskForm from '@/components/tasks/TaskForm';
+import BulkTaskForm from '@/components/tasks/BulkTaskForm';
 import GanttChart from '@/components/tasks/GanttChart';
+import OrganizationTaskList from '@/components/tasks/OrganizationTaskList';
 import { MedicalOrganization, Task, getAllMedicalOrganizations, getAllTasks } from '@/lib/db';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CheckCircle, Clock, AlertTriangle, ListTodo } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { CheckCircle, Clock, AlertTriangle, ListTodo, Plus, UserPlus } from 'lucide-react';
 import { differenceInDays, isBefore } from 'date-fns';
+import { useAuth } from '@/lib/auth-context';
 
 const Dashboard: React.FC = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [organizations, setOrganizations] = useState<MedicalOrganization[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
+  const [isBulkTaskFormOpen, setIsBulkTaskFormOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<Task | undefined>(undefined);
   const [refreshTrigger, setRefreshTrigger] = useState(false);
   const [taskStats, setTaskStats] = useState({
@@ -96,6 +102,10 @@ const Dashboard: React.FC = () => {
     setIsTaskFormOpen(true);
   };
 
+  const handleCreateBulkTasks = () => {
+    setIsBulkTaskFormOpen(true);
+  };
+
   const handleEditTask = (task: Task) => {
     setTaskToEdit(task);
     setIsTaskFormOpen(true);
@@ -108,7 +118,21 @@ const Dashboard: React.FC = () => {
 
   return (
     <MainLayout>
-      <h1 className="text-2xl font-bold mb-6">Система мониторинга задач</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Система мониторинга задач</h1>
+        {user?.isAdmin && (
+          <div className="flex space-x-2">
+            <Button onClick={handleCreateTask}>
+              <Plus className="mr-2 h-4 w-4" />
+              Новая задача
+            </Button>
+            <Button variant="outline" onClick={handleCreateBulkTasks}>
+              <UserPlus className="mr-2 h-4 w-4" />
+              Массовое создание
+            </Button>
+          </div>
+        )}
+      </div>
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4 mb-6">
         <Card>
@@ -158,11 +182,19 @@ const Dashboard: React.FC = () => {
         </Card>
       </div>
 
-      <Tabs defaultValue="list" className="space-y-4">
+      <Tabs defaultValue="organizations" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="organizations">По организациям</TabsTrigger>
           <TabsTrigger value="list">Список задач</TabsTrigger>
           <TabsTrigger value="gantt">Диаграмма Ганта</TabsTrigger>
         </TabsList>
+        <TabsContent value="organizations" className="space-y-4">
+          <OrganizationTaskList 
+            organizations={organizations}
+            onTaskEdit={handleEditTask}
+            refreshTasks={refreshTrigger}
+          />
+        </TabsContent>
         <TabsContent value="list" className="space-y-4">
           <TaskList 
             organizations={organizations}
@@ -183,6 +215,15 @@ const Dashboard: React.FC = () => {
           organizations={organizations}
           taskToEdit={taskToEdit}
           onTaskAdded={handleTaskUpdated}
+        />
+      )}
+
+      {isBulkTaskFormOpen && (
+        <BulkTaskForm
+          isOpen={isBulkTaskFormOpen}
+          onClose={() => setIsBulkTaskFormOpen(false)}
+          organizations={organizations}
+          onTasksAdded={handleTaskUpdated}
         />
       )}
     </MainLayout>
