@@ -2,12 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { format, differenceInDays, addDays } from 'date-fns';
+import { format, differenceInDays, addDays, isValid } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Task, MedicalOrganization } from '@/lib/db';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { FilterX } from 'lucide-react';
+import { TooltipProps } from 'recharts';
 
 interface GanttChartProps {
   tasks: Task[];
@@ -45,6 +46,13 @@ const GanttChart: React.FC<GanttChartProps> = ({ tasks, organizations }) => {
     filteredTasks.forEach(task => {
       const startDate = new Date(task.startDate);
       const endDate = new Date(task.endDate);
+      
+      // Проверяем валидность дат
+      if (!isValid(startDate) || !isValid(endDate)) {
+        console.error('Invalid date for task:', task);
+        return; // Пропускаем задачу с некорректными датами
+      }
+      
       const duration = differenceInDays(endDate, startDate) + 1; // Include both start and end days
       
       // Get organization name
@@ -57,6 +65,9 @@ const GanttChart: React.FC<GanttChartProps> = ({ tasks, organizations }) => {
         end: endDate,
         duration,
         completed: task.completionPercentage,
+        // Добавляем строковые представления дат для безопасного использования в тултипе
+        startString: task.startDate,
+        endString: task.endDate
       });
     });
     
@@ -87,19 +98,32 @@ const GanttChart: React.FC<GanttChartProps> = ({ tasks, organizations }) => {
 
   // Format date for x-axis
   const formatXAxis = (date: string) => {
-    return format(new Date(date), 'dd.MM', { locale: ru });
+    const parsedDate = new Date(date);
+    return isValid(parsedDate) ? format(parsedDate, 'dd.MM', { locale: ru }) : '';
   };
 
   // Custom tooltip
-  const CustomTooltip = ({ active, payload }: any) => {
+  const CustomTooltip: React.FC<TooltipProps<any, any>> = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
+      
+      // Безопасное форматирование дат
+      const formatSafeDate = (dateString: string) => {
+        try {
+          const date = new Date(dateString);
+          return isValid(date) ? format(date, 'dd.MM.yyyy', { locale: ru }) : 'Некорректная дата';
+        } catch (error) {
+          console.error('Error formatting date:', error);
+          return 'Некорректная дата';
+        }
+      };
+      
       return (
         <div className="bg-popover p-2 rounded shadow-md border border-border">
           <p className="font-bold">{data.name}</p>
           <p>{data.organization}</p>
-          <p>Начало: {format(data.start, 'dd.MM.yyyy', { locale: ru })}</p>
-          <p>Конец: {format(data.end, 'dd.MM.yyyy', { locale: ru })}</p>
+          <p>Начало: {formatSafeDate(data.startString)}</p>
+          <p>Конец: {formatSafeDate(data.endString)}</p>
           <p>Прогресс: {data.completed}%</p>
         </div>
       );
@@ -116,6 +140,9 @@ const GanttChart: React.FC<GanttChartProps> = ({ tasks, organizations }) => {
       name: task.name,
       fullName: task.name,
       index,
+      // Добавляем строковые представления дат для тултипа
+      startString: task.startString,
+      endString: task.endString
     };
     
     // Empty space before bar
@@ -218,7 +245,15 @@ const GanttChart: React.FC<GanttChartProps> = ({ tasks, organizations }) => {
                 <XAxis 
                   type="number" 
                   domain={[0, totalDays]} 
-                  tickFormatter={(value) => formatXAxis(format(addDays(minDate, value), 'yyyy-MM-dd'))}
+                  tickFormatter={(value) => {
+                    try {
+                      const date = addDays(minDate, value);
+                      return isValid(date) ? formatXAxis(format(date, 'yyyy-MM-dd')) : '';
+                    } catch (error) {
+                      console.error('Error formatting XAxis:', error);
+                      return '';
+                    }
+                  }}
                 />
                 <YAxis 
                   type="category" 
