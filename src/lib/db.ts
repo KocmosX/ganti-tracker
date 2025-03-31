@@ -116,6 +116,18 @@ export const getUserByUsername = async (username: string): Promise<User | undefi
   return db.getFromIndex('users', 'by-username', username);
 };
 
+export const authenticateUser = async (username: string, password: string): Promise<Omit<User, 'password'> | null> => {
+  const user = await getUserByUsername(username);
+  
+  if (user && user.password === password) {
+    // Return user without the password
+    const { password: _, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+  
+  return null;
+};
+
 export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
   await initDb();
   const id = await db.add('users', userData as User);

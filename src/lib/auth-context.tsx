@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, authenticateUser } from './db';
 import { useToast } from '@/hooks/use-toast';
@@ -23,7 +22,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check for existing session
     const storedUser = localStorage.getItem('user');
     const storedIsGuest = localStorage.getItem('isGuest');
     
