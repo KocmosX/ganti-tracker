@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { format, eachDayOfInterval, isWithinInterval, differenceInDays, isBefore } from 'date-fns';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { format, differenceInDays, addDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Task, MedicalOrganization } from '@/lib/db';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
+import { FilterX } from 'lucide-react';
 
 interface GanttChartProps {
   tasks: Task[];
@@ -13,188 +15,221 @@ interface GanttChartProps {
 }
 
 const GanttChart: React.FC<GanttChartProps> = ({ tasks, organizations }) => {
-  const [selectedMo, setSelectedMo] = useState<string>('');
   const [filteredTasks, setFilteredTasks] = useState<Task[]>([]);
-  const [dateRange, setDateRange] = useState<Date[]>([]);
-  const [organizationNames, setOrganizationNames] = useState<Record<number, string>>({});
+  const [selectedMo, setSelectedMo] = useState<string>('all');
+  const [chartData, setChartData] = useState<any[]>([]);
 
-  // Get all unique dates from tasks to create chart timeline
   useEffect(() => {
-    if (tasks.length === 0) return;
+    filterTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMo, tasks]);
 
-    // Create a mapping of organization IDs to names
-    const orgMap: Record<number, string> = {};
-    organizations.forEach(org => {
-      orgMap[org.id] = org.name;
-    });
-    setOrganizationNames(orgMap);
+  useEffect(() => {
+    prepareChartData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredTasks]);
 
-    // Filter tasks based on selected organization
+  const filterTasks = () => {
     let filtered = [...tasks];
-    if (selectedMo) {
+
+    if (selectedMo && selectedMo !== 'all') {
       filtered = filtered.filter(task => task.moId === parseInt(selectedMo));
     }
+
     setFilteredTasks(filtered);
-
-    // Find the min and max dates
-    let minDate = new Date();
-    let maxDate = new Date();
-
-    if (filtered.length > 0) {
-      minDate = filtered.reduce((min, task) => {
-        const taskStart = new Date(task.startDate);
-        return taskStart < min ? taskStart : min;
-      }, new Date(filtered[0].startDate));
-
-      maxDate = filtered.reduce((max, task) => {
-        const taskEnd = new Date(task.endDate);
-        return taskEnd > max ? taskEnd : max;
-      }, new Date(filtered[0].endDate));
-    }
-
-    // Generate all dates in range
-    const allDates = eachDayOfInterval({ start: minDate, end: maxDate });
-    setDateRange(allDates);
-  }, [tasks, selectedMo, organizations]);
-
-  const calculateTaskPosition = (task: Task, index: number) => {
-    if (dateRange.length === 0) return { left: 0, width: 0 };
-
-    const taskStart = new Date(task.startDate);
-    const taskEnd = new Date(task.endDate);
-    const today = new Date();
-    
-    // Find position as percentage of chart width
-    const chartStartDate = dateRange[0];
-    const chartEndDate = dateRange[dateRange.length - 1];
-    const totalDays = differenceInDays(chartEndDate, chartStartDate) + 1;
-    
-    const startOffset = Math.max(0, differenceInDays(taskStart, chartStartDate));
-    const taskDuration = differenceInDays(taskEnd, taskStart) + 1;
-    
-    const left = (startOffset / totalDays) * 100;
-    const width = (taskDuration / totalDays) * 100;
-
-    // Determine task status for coloring
-    let statusClass = 'gantt-task-ontime';
-    
-    if (task.completionPercentage === 100) {
-      statusClass = 'gantt-task-ontime';
-    } else if (isBefore(taskEnd, today)) {
-      statusClass = 'gantt-task-overdue';
-    } else if (differenceInDays(taskEnd, today) <= 3) {
-      statusClass = 'gantt-task-delayed';
-    }
-
-    return { left, width, statusClass };
   };
 
-  const getOverdueLabel = (task: Task) => {
-    const today = new Date();
-    const endDate = new Date(task.endDate);
+  const prepareChartData = () => {
+    const data: any[] = [];
     
-    if (task.completionPercentage < 100 && isBefore(endDate, today)) {
-      const overdueDays = Math.abs(differenceInDays(today, endDate));
-      return `Просрочено на ${overdueDays} ${overdueDays === 1 ? 'день' : overdueDays < 5 ? 'дня' : 'дней'}`;
+    filteredTasks.forEach(task => {
+      const startDate = new Date(task.startDate);
+      const endDate = new Date(task.endDate);
+      const duration = differenceInDays(endDate, startDate) + 1; // Include both start and end days
+      
+      // Get organization name
+      const orgName = organizations.find(org => org.id === task.moId)?.name || 'Неизвестная организация';
+      
+      data.push({
+        name: task.title,
+        organization: orgName,
+        start: startDate,
+        end: endDate,
+        duration,
+        completed: task.completionPercentage,
+      });
+    });
+    
+    // Sort by start date
+    data.sort((a, b) => a.start.getTime() - b.start.getTime());
+    
+    setChartData(data);
+  };
+
+  const resetFilters = () => {
+    setSelectedMo('all');
+  };
+
+  const getMinMaxDates = () => {
+    if (chartData.length === 0) return { min: new Date(), max: addDays(new Date(), 30) };
+    
+    const minDate = chartData.reduce((min, item) => 
+      item.start < min ? item.start : min, chartData[0].start);
+      
+    const maxDate = chartData.reduce((max, item) => 
+      item.end > max ? item.end : max, chartData[0].end);
+      
+    return { min: minDate, max: maxDate };
+  };
+
+  const { min: minDate, max: maxDate } = getMinMaxDates();
+  const totalDays = differenceInDays(maxDate, minDate) + 1;
+
+  // Format date for x-axis
+  const formatXAxis = (date: string) => {
+    return format(new Date(date), 'dd.MM', { locale: ru });
+  };
+
+  // Custom tooltip
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="bg-popover p-2 rounded shadow-md border border-border">
+          <p className="font-bold">{data.name}</p>
+          <p>{data.organization}</p>
+          <p>Начало: {format(data.start, 'dd.MM.yyyy', { locale: ru })}</p>
+          <p>Конец: {format(data.end, 'dd.MM.yyyy', { locale: ru })}</p>
+          <p>Прогресс: {data.completed}%</p>
+        </div>
+      );
     }
     return null;
   };
 
+  // Prepare data for chart
+  const barChartData = chartData.map((task, index) => {
+    const startOffset = differenceInDays(task.start, minDate);
+    const progressWidth = (task.duration * task.completed) / 100;
+    
+    const dataPoint: any = {
+      name: task.name,
+      fullName: task.name,
+      index,
+    };
+    
+    // Empty space before bar
+    dataPoint[`padding${index}`] = startOffset;
+    
+    // Completed portion of task
+    dataPoint[`completed${index}`] = progressWidth;
+    
+    // Remaining portion of task
+    dataPoint[`remaining${index}`] = task.duration - progressWidth;
+    
+    return dataPoint;
+  });
+
+  // Generate bar definitions for chart
+  const generateBars = () => {
+    const bars: JSX.Element[] = [];
+    
+    chartData.forEach((_, index) => {
+      // Padding bar (invisible)
+      bars.push(
+        <Bar 
+          key={`padding${index}`} 
+          dataKey={`padding${index}`} 
+          stackId={`stack${index}`} 
+          fill="transparent" 
+        />
+      );
+      
+      // Completed portion (green)
+      bars.push(
+        <Bar 
+          key={`completed${index}`} 
+          dataKey={`completed${index}`} 
+          stackId={`stack${index}`} 
+          fill="#4ade80" 
+        />
+      );
+      
+      // Remaining portion (light blue)
+      bars.push(
+        <Bar 
+          key={`remaining${index}`} 
+          dataKey={`remaining${index}`} 
+          stackId={`stack${index}`} 
+          fill="#93c5fd" 
+        />
+      );
+    });
+    
+    return bars;
+  };
+
   return (
-    <Card className="mt-6">
+    <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle>Диаграмма Ганта</CardTitle>
-        <div className="w-64">
-          <Select
-            value={selectedMo}
-            onValueChange={setSelectedMo}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Фильтр по организации" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Все организации</SelectItem>
-              {organizations.map((org) => (
-                <SelectItem key={org.id} value={org.id.toString()}>
-                  {org.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex space-x-2">
+          <div className="w-64">
+            <Select
+              value={selectedMo}
+              onValueChange={setSelectedMo}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Фильтр по организации" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все организации</SelectItem>
+                {organizations.map((org) => (
+                  <SelectItem 
+                    key={org.id} 
+                    value={org.id !== undefined ? org.id.toString() : 'unknown'}
+                  >
+                    {org.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button variant="outline" onClick={resetFilters}>
+            <FilterX className="mr-2 h-4 w-4" />
+            Сбросить фильтры
+          </Button>
         </div>
       </CardHeader>
       <CardContent>
-        {dateRange.length === 0 || filteredTasks.length === 0 ? (
-          <div className="text-center py-6 text-muted-foreground">
-            Нет данных для отображения
+        {chartData.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            Нет задач для отображения на диаграмме
           </div>
         ) : (
-          <div className="gantt-container">
-            <div className="grid grid-cols-[200px_1fr] border rounded-md">
-              <div className="border-r bg-muted/30 p-2 font-medium">Задачи</div>
-              <ScrollArea className="h-10 overflow-x-auto">
-                <div className="flex min-w-full">
-                  {dateRange.map((date, i) => (
-                    <div 
-                      key={i} 
-                      className="flex-1 min-w-16 p-2 text-center text-xs border-r last:border-r-0"
-                    >
-                      {format(date, 'dd.MM', { locale: ru })}
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-              
-              {filteredTasks.map((task, index) => {
-                const { left, width, statusClass } = calculateTaskPosition(task, index);
-                const overdueLabel = getOverdueLabel(task);
-                
-                return (
-                  <React.Fragment key={task.id}>
-                    <div className="border-t border-r p-2 truncate" title={task.title}>
-                      {task.title}
-                    </div>
-                    <div className="border-t relative h-10">
-                      <ScrollArea className="h-full overflow-x-auto">
-                        <div className="flex min-w-full h-full relative">
-                          <div 
-                            className={`gantt-task ${statusClass} absolute`}
-                            style={{ 
-                              left: `${left}%`, 
-                              width: `${width}%`,
-                              maxWidth: '100%'
-                            }}
-                            title={`${task.title} (${format(new Date(task.startDate), 'dd.MM.yyyy', { locale: ru })} - ${format(new Date(task.endDate), 'dd.MM.yyyy', { locale: ru })})`}
-                          >
-                            {task.completionPercentage}%
-                            {overdueLabel && (
-                              <div className="absolute -bottom-5 left-0 text-xs text-status-overdue whitespace-nowrap">
-                                {overdueLabel}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </ScrollArea>
-                    </div>
-                  </React.Fragment>
-                );
-              })}
-            </div>
-            
-            <div className="mt-4 flex items-center space-x-4 justify-end">
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-status-ontime rounded-full"></div>
-                <span className="text-xs">В срок</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-status-delayed rounded-full"></div>
-                <span className="text-xs">Приближается срок</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-status-overdue rounded-full"></div>
-                <span className="text-xs">Просрочено</span>
-              </div>
-            </div>
+          <div className="h-[500px] mt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                layout="vertical"
+                data={barChartData}
+                margin={{ top: 20, right: 30, left: 120, bottom: 20 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  type="number" 
+                  domain={[0, totalDays]} 
+                  tickFormatter={(value) => formatXAxis(format(addDays(minDate, value), 'yyyy-MM-dd'))}
+                />
+                <YAxis 
+                  type="category" 
+                  dataKey="fullName"
+                  width={120}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+                {generateBars()}
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         )}
       </CardContent>
