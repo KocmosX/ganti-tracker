@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit, Check, X } from 'lucide-react';
+import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit, Check, X, ExternalLink } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Task, MedicalOrganization, getAllTasks, getMedicalOrganizationById, deleteTask, updateTaskMoStatus } from '@/lib/db';
@@ -102,6 +102,7 @@ const TaskList: React.FC<TaskListProps> = ({
       filtered = filtered.filter(task => 
         task.title.toLowerCase().includes(lowerSearchTerm) ||
         task.description.toLowerCase().includes(lowerSearchTerm) ||
+        task.assignedBy?.toLowerCase().includes(lowerSearchTerm) ||
         organizationNames[task.moId]?.toLowerCase().includes(lowerSearchTerm)
       );
     }
@@ -372,7 +373,20 @@ const TaskList: React.FC<TaskListProps> = ({
                           <TableRow>
                             <TableCell colSpan={9} className="p-0 border-t-0">
                               <div className="pl-6 pr-4 py-2 bg-muted/20">
-                                <h4 className="text-sm font-semibold mb-2">Статусы по организациям</h4>
+                                <div className="flex justify-between items-center mb-2">
+                                  <h4 className="text-sm font-semibold">Статусы по организациям</h4>
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onTaskEdit(task);
+                                    }}
+                                  >
+                                    <Pencil size={14} className="mr-1" />
+                                    Редактировать задачу
+                                  </Button>
+                                </div>
                                 <div className="rounded-md border overflow-hidden">
                                   <Table>
                                     <TableHeader>

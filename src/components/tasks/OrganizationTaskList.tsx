@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -25,7 +26,8 @@ import {
   ArrowUpDown, 
   BarChart4,
   Eye,
-  ExternalLink
+  ExternalLink,
+  Pencil
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import TaskDetailsModal from './TaskDetailsModal';
@@ -66,6 +68,8 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const [showOnlyWithTasks, setShowOnlyWithTasks] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [assignerFilter, setAssignerFilter] = useState<string>('all');
+  const [availableAssigners, setAvailableAssigners] = useState<string[]>([]);
 
   useEffect(() => {
     loadTasks();
@@ -74,12 +78,18 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   useEffect(() => {
     if (tasks.length && organizations.length) {
       calculateOrgTaskStats();
+      
+      // Extract unique task assigners
+      const assigners = Array.from(new Set(tasks.map(task => task.assignedBy)))
+        .filter(assigner => assigner) // Filter out undefined/null/empty
+        .sort();
+      setAvailableAssigners(assigners);
     }
   }, [tasks, organizations]);
 
   useEffect(() => {
     applySorting();
-  }, [orgTaskStats, sortKey, sortDirection, searchTerm, filterType, showOnlyWithTasks]);
+  }, [orgTaskStats, sortKey, sortDirection, searchTerm, filterType, showOnlyWithTasks, assignerFilter]);
 
   const loadTasks = async () => {
     try {
@@ -97,7 +107,18 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     organizations.forEach(org => {
       if (org.id === undefined) return;
 
-      const orgTasks = tasks.filter(task => task.moId === org.id);
+      // Filter tasks for this organization but also respect the assigner filter
+      let orgTasks = tasks.filter(task => {
+        const isForThisOrg = task.moId === org.id || 
+                            (task.moStatuses && task.moStatuses.some(status => status.moId === org.id));
+        
+        if (assignerFilter !== 'all') {
+          return isForThisOrg && task.assignedBy === assignerFilter;
+        }
+        
+        return isForThisOrg;
+      });
+
       let tasksCompleted = 0;
       let tasksInProgress = 0;
       let tasksOverdue = 0;
@@ -186,6 +207,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const resetFilters = () => {
     setSearchTerm('');
     setFilterType('all');
+    setAssignerFilter('all');
     setShowOnlyWithTasks(false);
   };
 
@@ -267,6 +289,24 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                   <SelectItem value="КДЦ">КДЦ</SelectItem>
                 </SelectContent>
               </Select>
+              
+              <Select
+                value={assignerFilter}
+                onValueChange={setAssignerFilter}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Постановщик задачи" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все постановщики</SelectItem>
+                  {availableAssigners.map(assigner => (
+                    <SelectItem key={assigner} value={assigner}>
+                      {assigner}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              
               <Button variant="outline" onClick={resetFilters}>
                 <FilterX className="mr-2 h-4 w-4" />
                 Сбросить
@@ -415,7 +455,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                           onClick={(e) => handleEditTask(task, e)}
                                           title="Редактировать задачу"
                                         >
-                                          <ExternalLink size={14} />
+                                          <Pencil size={14} />
                                         </Button>
                                       </div>
                                     </div>
@@ -433,6 +473,9 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                         <Progress value={task.completionPercentage} className="h-1.5 w-20" />
                                         <span>{task.completionPercentage}%</span>
                                       </div>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-2">
+                                      Постановщик: {task.assignedBy || "Не указан"}
                                     </div>
                                   </div>
                                 ))}

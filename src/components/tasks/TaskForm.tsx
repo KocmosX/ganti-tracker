@@ -26,6 +26,16 @@ interface TaskFormProps {
   allowMultipleOrganizations?: boolean;
 }
 
+// Предопределенный список возможных постановщиков задач
+const TASK_ASSIGNERS = [
+  'Администратор',
+  'Руководитель',
+  'Менеджер',
+  'Координатор',
+  'Аналитик',
+  'Главврач',
+];
+
 const TaskForm: React.FC<TaskFormProps> = ({ 
   isOpen, 
   onClose, 
@@ -46,6 +56,9 @@ const TaskForm: React.FC<TaskFormProps> = ({
   const [status, setStatus] = useState<TaskStatus>(TaskStatus.NotStarted);
   const [result, setResult] = useState('');
   const [comment, setComment] = useState('');
+  const [assignedBy, setAssignedBy] = useState<string>(user?.username || '');
+  const [customAssigner, setCustomAssigner] = useState<string>('');
+  const [isCustomAssigner, setIsCustomAssigner] = useState<boolean>(false);
 
   useEffect(() => {
     if (taskToEdit) {
@@ -58,6 +71,14 @@ const TaskForm: React.FC<TaskFormProps> = ({
       setStatus(taskToEdit.status || TaskStatus.NotStarted);
       setResult(taskToEdit.result || '');
       setComment(taskToEdit.comment || '');
+      setAssignedBy(taskToEdit.assignedBy || user?.username || '');
+      
+      // Check if it's a custom assigner
+      const isCustom = !TASK_ASSIGNERS.includes(taskToEdit.assignedBy);
+      setIsCustomAssigner(isCustom);
+      if (isCustom) {
+        setCustomAssigner(taskToEdit.assignedBy || '');
+      }
       
       // Initialize selected MO IDs if task has moStatuses
       if (taskToEdit.moStatuses && taskToEdit.moStatuses.length > 0) {
@@ -69,7 +90,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
     } else {
       resetForm();
     }
-  }, [taskToEdit, isOpen]);
+  }, [taskToEdit, isOpen, user]);
 
   const resetForm = () => {
     setTitle('');
@@ -82,6 +103,9 @@ const TaskForm: React.FC<TaskFormProps> = ({
     setStatus(TaskStatus.NotStarted);
     setResult('');
     setComment('');
+    setAssignedBy(user?.username || '');
+    setCustomAssigner('');
+    setIsCustomAssigner(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -96,13 +120,15 @@ const TaskForm: React.FC<TaskFormProps> = ({
       return;
     }
 
+    const finalAssignedBy = isCustomAssigner ? customAssigner : assignedBy;
+
     try {
       const baseTaskData = {
         title,
         description,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
-        assignedBy: user?.username || 'Гость',
+        assignedBy: finalAssignedBy,
         completionPercentage,
         status,
         result,
@@ -193,6 +219,15 @@ const TaskForm: React.FC<TaskFormProps> = ({
 
   const deselectAllMos = () => {
     setSelectedMoIds([]);
+  };
+
+  const handleAssignerChange = (value: string) => {
+    if (value === 'custom') {
+      setIsCustomAssigner(true);
+    } else {
+      setIsCustomAssigner(false);
+      setAssignedBy(value);
+    }
   };
 
   return (
@@ -295,6 +330,37 @@ const TaskForm: React.FC<TaskFormProps> = ({
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
               />
+            </div>
+            
+            <div className="grid gap-2">
+              <Label htmlFor="assignedBy">Постановщик задачи</Label>
+              <Select
+                value={isCustomAssigner ? 'custom' : assignedBy}
+                onValueChange={handleAssignerChange}
+              >
+                <SelectTrigger id="assignedBy">
+                  <SelectValue placeholder="Выберите постановщика" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TASK_ASSIGNERS.map((assigner) => (
+                    <SelectItem key={assigner} value={assigner}>
+                      {assigner}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">Другое (ввести вручную)</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {isCustomAssigner && (
+                <div className="mt-2">
+                  <Input
+                    placeholder="Введите имя постановщика"
+                    value={customAssigner}
+                    onChange={(e) => setCustomAssigner(e.target.value)}
+                    required={isCustomAssigner}
+                  />
+                </div>
+              )}
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
