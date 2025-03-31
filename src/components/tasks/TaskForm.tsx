@@ -161,7 +161,10 @@ const TaskForm: React.FC<TaskFormProps> = ({
                 </SelectTrigger>
                 <SelectContent>
                   {organizations.map((org) => (
-                    <SelectItem key={org.id} value={org.id.toString()}>
+                    <SelectItem 
+                      key={org.id} 
+                      value={org.id !== undefined ? org.id.toString() : 'unknown'} // Ensure we never pass empty string
+                    >
                       {org.name}
                     </SelectItem>
                   ))}

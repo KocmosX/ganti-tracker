@@ -174,7 +174,10 @@ const TaskList: React.FC<TaskListProps> = ({
                 <SelectContent>
                   <SelectItem value="all">Все организации</SelectItem>
                   {organizations.map((org) => (
-                    <SelectItem key={org.id} value={org.id?.toString() || 'unknown'}>
+                    <SelectItem 
+                      key={org.id} 
+                      value={org.id?.toString() || 'unknown'} // Ensure we never pass empty string
+                    >
                       {org.name}
                     </SelectItem>
                   ))}
