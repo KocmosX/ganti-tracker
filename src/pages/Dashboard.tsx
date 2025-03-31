@@ -216,6 +216,7 @@ const Dashboard: React.FC = () => {
           organizations={organizations}
           taskToEdit={taskToEdit}
           onTaskAdded={handleTaskUpdated}
+          allowMultipleOrganizations={true}
         />
       )}
 

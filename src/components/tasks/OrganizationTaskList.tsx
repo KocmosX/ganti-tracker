@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -25,7 +24,8 @@ import {
   FilterX, 
   ArrowUpDown, 
   BarChart4,
-  Eye
+  Eye,
+  ExternalLink
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import TaskDetailsModal from './TaskDetailsModal';
@@ -94,11 +94,9 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     const stats: OrgTaskStats[] = [];
     const today = new Date();
 
-    // Создаем статистику для каждой организации
     organizations.forEach(org => {
       if (org.id === undefined) return;
 
-      // Фильтруем задачи для данной организации
       const orgTasks = tasks.filter(task => task.moId === org.id);
       let tasksCompleted = 0;
       let tasksInProgress = 0;
@@ -117,7 +115,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
         }
       });
 
-      // Рассчитываем процент завершения всех задач организации
       const completionPercent = orgTasks.length > 0
         ? Math.round(orgTasks.reduce((acc, task) => acc + task.completionPercentage, 0) / orgTasks.length)
         : 0;
@@ -140,14 +137,12 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const applySorting = () => {
     let filtered = [...orgTaskStats];
 
-    // Поиск по названию организации
     if (searchTerm) {
       filtered = filtered.filter(org => 
         org.name.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
-    // Фильтрация по типу организации
     if (filterType !== 'all') {
       filtered = filtered.filter(org => {
         if (filterType === 'ВПО') return org.name.includes('ВПО');
@@ -158,12 +153,10 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       });
     }
 
-    // Показывать только организации с задачами
     if (showOnlyWithTasks) {
       filtered = filtered.filter(org => org.tasksTotal > 0);
     }
 
-    // Сортировка
     filtered.sort((a, b) => {
       if (sortKey === 'name') {
         return sortDirection === 'asc' 
@@ -217,13 +210,21 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     }));
   };
 
-  const handleViewTaskDetails = (task: Task) => {
+  const handleViewTaskDetails = (task: Task, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
     setSelectedTask(task);
     setIsDetailsModalOpen(true);
   };
 
   const handleTaskUpdated = () => {
     loadTasks();
+  };
+
+  const handleEditTask = (task: Task, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onTaskEdit(task);
   };
 
   return (
@@ -392,7 +393,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                 {org.tasks.map(task => (
                                   <div 
                                     key={task.id} 
-                                    className="bg-card border rounded-md p-3 relative"
+                                    className="bg-card border rounded-md p-3 relative hover:bg-muted/30 transition-colors"
                                   >
                                     <div className="flex justify-between mb-2">
                                       <h5 className="font-medium">{task.title}</h5>
@@ -402,12 +403,19 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                           variant="ghost"
                                           size="icon"
                                           className="h-6 w-6"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleViewTaskDetails(task);
-                                          }}
+                                          onClick={(e) => handleViewTaskDetails(task, e)}
+                                          title="Просмотреть детали"
                                         >
                                           <Eye size={14} />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-6 w-6"
+                                          onClick={(e) => handleEditTask(task, e)}
+                                          title="Редактировать задачу"
+                                        >
+                                          <ExternalLink size={14} />
                                         </Button>
                                       </div>
                                     </div>
