@@ -112,13 +112,16 @@ const TaskForm: React.FC<TaskFormProps> = ({
       if (allowMultipleOrganizations && selectedMoIds.length > 0) {
         // For multiple MOs
         const primaryMoId = parseInt(selectedMoIds[0]);
+        const currentTime = new Date().toISOString();
+        
         const taskData = {
           ...baseTaskData,
           moId: primaryMoId,
           moStatuses: selectedMoIds.map(id => ({
             moId: parseInt(id),
             completionPercentage: 0,
-            comment: ''
+            comment: '',
+            lastUpdated: currentTime
           }))
         };
 
