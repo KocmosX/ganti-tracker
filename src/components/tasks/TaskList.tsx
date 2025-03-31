@@ -33,7 +33,7 @@ const TaskList: React.FC<TaskListProps> = ({
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filteredTasks, setFilteredTasks] = useState<Task[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedMo, setSelectedMo] = useState<string>('');
+  const [selectedMo, setSelectedMo] = useState<string>('all');
   const [organizationNames, setOrganizationNames] = useState<Record<number, string>>({});
   const [taskToDelete, setTaskToDelete] = useState<number | null>(null);
 
@@ -46,7 +46,9 @@ const TaskList: React.FC<TaskListProps> = ({
     // Create a mapping of organization IDs to names for quicker lookup
     const orgMap: Record<number, string> = {};
     organizations.forEach(org => {
-      orgMap[org.id] = org.name;
+      if (org.id !== undefined) {
+        orgMap[org.id] = org.name;
+      }
     });
     setOrganizationNames(orgMap);
   }, [organizations]);
@@ -73,7 +75,7 @@ const TaskList: React.FC<TaskListProps> = ({
   const filterTasks = () => {
     let filtered = [...tasks];
 
-    if (selectedMo) {
+    if (selectedMo && selectedMo !== 'all') {
       filtered = filtered.filter(task => task.moId === parseInt(selectedMo));
     }
 
@@ -113,7 +115,7 @@ const TaskList: React.FC<TaskListProps> = ({
 
   const resetFilters = () => {
     setSearchTerm('');
-    setSelectedMo('');
+    setSelectedMo('all');
   };
 
   const calculateDaysLeft = (endDateStr: string) => {
@@ -170,9 +172,9 @@ const TaskList: React.FC<TaskListProps> = ({
                   <SelectValue placeholder="Фильтр по организации" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Все организации</SelectItem>
+                  <SelectItem value="all">Все организации</SelectItem>
                   {organizations.map((org) => (
-                    <SelectItem key={org.id} value={org.id.toString()}>
+                    <SelectItem key={org.id} value={org.id?.toString() || 'unknown'}>
                       {org.name}
                     </SelectItem>
                   ))}
@@ -240,7 +242,7 @@ const TaskList: React.FC<TaskListProps> = ({
                               size="icon"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setTaskToDelete(task.id);
+                                setTaskToDelete(task.id || null);
                               }}
                             >
                               <Trash size={16} />

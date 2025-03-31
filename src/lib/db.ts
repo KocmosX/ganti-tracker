@@ -1,17 +1,5 @@
 
-import { openDB, DBSchema } from 'idb';
-
-export interface User {
-  id: number;
-  username: string;
-  password: string;  // In a real app, this would be hashed
-  isAdmin: boolean;
-}
-
-export interface MedicalOrganization {
-  id: number;
-  name: string;
-}
+import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
 export enum TaskStatus {
   NotStarted = 'Не начата',
@@ -19,174 +7,171 @@ export enum TaskStatus {
   Completed = 'Завершена'
 }
 
+export interface User {
+  id?: number;
+  username: string;
+  password: string;
+  isAdmin: boolean;
+}
+
+export interface MedicalOrganization {
+  id?: number;
+  name: string;
+}
+
 export interface Task {
-  id: number;
-  moId: number;
+  id?: number;
   title: string;
   description: string;
+  moId: number;
   startDate: string;
   endDate: string;
   assignedBy: string;
   completionPercentage: number;
   status: TaskStatus;
-  result: string;
-  comment: string;
+  result?: string;
+  comment?: string;
 }
 
-interface TaskManagerDB extends DBSchema {
+interface TaskDB extends DBSchema {
   users: {
     key: number;
     value: User;
     indexes: { 'by-username': string };
   };
-  medicalOrganizations: {
+  medical_organizations: {
     key: number;
     value: MedicalOrganization;
   };
   tasks: {
     key: number;
     value: Task;
-    indexes: { 'by-mo': number };
+    indexes: { 'by-moId': number };
   };
 }
 
-export const initDB = async () => {
-  const db = await openDB<TaskManagerDB>('task-manager-db', 1, {
-    upgrade(db) {
-      // Create users store
-      const userStore = db.createObjectStore('users', { keyPath: 'id', autoIncrement: true });
-      userStore.createIndex('by-username', 'username', { unique: true });
+let db: IDBPDatabase<TaskDB>;
 
-      // Create medical organizations store
-      db.createObjectStore('medicalOrganizations', { keyPath: 'id', autoIncrement: true });
-
-      // Create tasks store
-      const taskStore = db.createObjectStore('tasks', { keyPath: 'id', autoIncrement: true });
-      taskStore.createIndex('by-mo', 'moId');
-
-      // Seed initial admin users
-      const admins = [
-        { username: 'evbelugina', password: 'password', isAdmin: true },
-        { username: 'nvizmaylova', password: 'password', isAdmin: true },
-        { username: 'yvnikitenko', password: 'password', isAdmin: true },
-        { username: 'nv-mironova', password: 'password', isAdmin: true },
-        { username: 'aknol', password: 'password', isAdmin: true },
-        { username: 'nebakulina', password: 'password', isAdmin: true },
-        { username: 'nv_kovaleva', password: 'password', isAdmin: true },
-        { username: 'siyadykin', password: 'password', isAdmin: true },
-      ];
-      
-      admins.forEach(admin => {
-        userStore.add(admin);
-      });
-
-      // Seed medical organizations
-      const organizations = [
-        "ГАУЗ НСО \"ГКП №1\" ВПО",
-        "ГАУЗ НСО \"ГКП №1\" ДПО",
-        "ГБУЗ НСО \"ГКБ №1\" КДЦ",
-        "ГБУЗ НСО \"ДГКБ №1\" ДПО",
-        "ГБУЗ НСО \"НКРБ №1\" ВПО, р.п. Кольцово",
-        "ГБУЗ НСО \"НКРБ №1\" ВПО, с. Барышево",
-        "ГБУЗ НСО \"НКРБ №1\" ДПО",
-        "ГБУЗ НСО \"ГКБ №2\" ВПО пр. Дзержинского, 15",
-        "ГБУЗ НСО \"ГКБ №2\" ВПО пр. Дзержинского, 71",
-        "ГБУЗ НСО \"ГКБ №2\" ВПО ул. Кошурникова, 18",
-        "ГБУЗ НСО \"ГКБ №2\" ВПО ул. Гоголя, 225/1",
-        "ГБУЗ НСО \"ГКБ №2\" ВПО п.Восход, ул.Мирная, 1в",
-        "ГБУЗ НСО \"ГКБ №2\" КДЦ пр. Дзержинского, 44",
-        // We would add all the organizations here, but for brevity I'm showing just a few
-        // You can add the rest of the organizations from your list
-      ];
-      
-      const moStore = db.transaction('medicalOrganizations', 'readwrite').objectStore('medicalOrganizations');
-      organizations.forEach(org => {
-        moStore.add({ name: org });
-      });
-    }
-  });
-
-  return db;
-};
-
-export const getDB = async () => {
-  return await openDB<TaskManagerDB>('task-manager-db', 1);
-};
-
-// User functions
-export const authenticateUser = async (username: string, password: string) => {
-  const db = await getDB();
-  const userIndex = db.transaction('users').store.index('by-username');
-  const user = await userIndex.get(username);
-  
-  if (user && user.password === password) {
-    // In a real app, we would compare hashed passwords
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+export const initDb = async () => {
+  try {
+    db = await openDB<TaskDB>('task-management-db', 1, {
+      upgrade(database, oldVersion, newVersion, transaction) {
+        // Create users store
+        if (!database.objectStoreNames.contains('users')) {
+          const userStore = database.createObjectStore('users', { keyPath: 'id', autoIncrement: true });
+          userStore.createIndex('by-username', 'username', { unique: true });
+          
+          // Add admin users
+          const adminUsers = [
+            'evbelugina', 'nvizmaylova', 'yvnikitenko', 'nv-mironova', 
+            'aknol', 'nebakulina', 'nv_kovaleva', 'siyadykin'
+          ];
+          
+          const tx = transaction.objectStore('users');
+          adminUsers.forEach(username => {
+            tx.add({
+              username,
+              password: username, // Same as username for simplicity
+              isAdmin: true
+            });
+          });
+        }
+        
+        // Create medical organizations store
+        if (!database.objectStoreNames.contains('medical_organizations')) {
+          const moStore = database.createObjectStore('medical_organizations', { keyPath: 'id', autoIncrement: true });
+          
+          // Add medical organizations
+          const organizations = [
+            "ГАУЗ НСО \"ГКП №1\" ВПО",
+            "ГАУЗ НСО \"ГКП №1\" ДПО",
+            // Add all other organizations from the list
+            "ГБУЗ НСО \"НОКОД\" КС"
+          ];
+          
+          const tx = transaction.objectStore('medical_organizations');
+          organizations.forEach(name => {
+            tx.add({ name });
+          });
+        }
+        
+        // Create tasks store
+        if (!database.objectStoreNames.contains('tasks')) {
+          const taskStore = database.createObjectStore('tasks', { keyPath: 'id', autoIncrement: true });
+          taskStore.createIndex('by-moId', 'moId', { unique: false });
+        }
+      }
+    });
+    
+    return db;
+  } catch (error) {
+    console.error('Error initializing database:', error);
+    throw error;
   }
+};
+
+// User operations
+export const getUserByUsername = async (username: string): Promise<User | undefined> => {
+  await initDb();
+  return db.getFromIndex('users', 'by-username', username);
+};
+
+export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
+  await initDb();
+  const id = await db.add('users', userData as User);
+  return { ...userData, id };
+};
+
+// Medical Organization operations
+export const getAllMedicalOrganizations = async (): Promise<MedicalOrganization[]> => {
+  await initDb();
+  return db.getAll('medical_organizations');
+};
+
+export const getMedicalOrganizationById = async (id: number): Promise<MedicalOrganization | undefined> => {
+  await initDb();
+  return db.get('medical_organizations', id);
+};
+
+export const createMedicalOrganization = async (orgData: Omit<MedicalOrganization, 'id'>): Promise<MedicalOrganization> => {
+  await initDb();
+  const id = await db.add('medical_organizations', orgData as MedicalOrganization);
+  return { ...orgData, id };
+};
+
+// Task operations
+export const getAllTasks = async (): Promise<Task[]> => {
+  await initDb();
+  return db.getAll('tasks');
+};
+
+export const getTaskById = async (id: number): Promise<Task | undefined> => {
+  await initDb();
+  return db.get('tasks', id);
+};
+
+export const getTasksByMoId = async (moId: number): Promise<Task[]> => {
+  await initDb();
+  return db.getAllFromIndex('tasks', 'by-moId', moId);
+};
+
+export const createTask = async (taskData: Omit<Task, 'id'>): Promise<Task> => {
+  await initDb();
+  const id = await db.add('tasks', taskData as Task);
+  return { ...taskData, id };
+};
+
+export const updateTask = async (id: number, taskData: Partial<Omit<Task, 'id'>>): Promise<Task> => {
+  await initDb();
+  const task = await getTaskById(id);
+  if (!task) throw new Error(`Task with id ${id} not found`);
   
-  return null;
-};
-
-export const getAllUsers = async () => {
-  const db = await getDB();
-  return await db.getAll('users');
-};
-
-// Medical Organization functions
-export const getAllMedicalOrganizations = async () => {
-  const db = await getDB();
-  return await db.getAll('medicalOrganizations');
-};
-
-export const getMedicalOrganizationById = async (id: number) => {
-  const db = await getDB();
-  return await db.get('medicalOrganizations', id);
-};
-
-// Task functions
-export const createTask = async (task: Omit<Task, 'id'>) => {
-  const db = await getDB();
-  return await db.add('tasks', task);
-};
-
-export const updateTask = async (id: number, task: Partial<Task>) => {
-  const db = await getDB();
-  const tx = db.transaction('tasks', 'readwrite');
-  const store = tx.objectStore('tasks');
-  
-  const existingTask = await store.get(id);
-  if (!existingTask) {
-    throw new Error('Task not found');
-  }
-  
-  const updatedTask = { ...existingTask, ...task };
-  await store.put(updatedTask);
-  await tx.done;
-  
+  const updatedTask = { ...task, ...taskData };
+  await db.put('tasks', updatedTask);
   return updatedTask;
 };
 
-export const deleteTask = async (id: number) => {
-  const db = await getDB();
+export const deleteTask = async (id: number): Promise<void> => {
+  await initDb();
   await db.delete('tasks', id);
 };
-
-export const getAllTasks = async () => {
-  const db = await getDB();
-  return await db.getAll('tasks');
-};
-
-export const getTasksByMedicalOrganization = async (moId: number) => {
-  const db = await getDB();
-  const index = db.transaction('tasks').store.index('by-mo');
-  return await index.getAll(moId);
-};
-
-export const getTaskById = async (id: number) => {
-  const db = await getDB();
-  return await db.get('tasks', id);
-};
-
-// Initialize database on app start
-initDB().catch(e => console.error('Error initializing database:', e));
