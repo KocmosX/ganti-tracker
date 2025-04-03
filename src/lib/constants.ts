@@ -42,3 +42,17 @@ export const FILTER_TYPES = {
   KS: 'КС',
   KDC: 'КДЦ'
 };
+
+export const PRIORITY_LEVELS = {
+  LOW: 'low',
+  MEDIUM: 'medium',
+  HIGH: 'high',
+  URGENT: 'urgent'
+};
+
+export const PRIORITY_LABELS = {
+  [PRIORITY_LEVELS.LOW]: 'Низкий',
+  [PRIORITY_LEVELS.MEDIUM]: 'Средний',
+  [PRIORITY_LEVELS.HIGH]: 'Высокий',
+  [PRIORITY_LEVELS.URGENT]: 'Срочный'
+};

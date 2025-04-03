@@ -19,7 +19,7 @@ import {
 } from '@/lib/db';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { format, differenceInDays } from 'date-fns';
+import { format, differenceInDays, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { 
   Search, 
@@ -30,12 +30,21 @@ import {
   Pencil,
   Filter,
   Check,
-  X
+  X,
+  CalendarIcon,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import TaskDetailsModal from './TaskDetailsModal';
 import { useToast } from '@/hooks/use-toast';
-import { TASK_ASSIGNERS } from '@/lib/constants';
+import { FILTER_TYPES, PRIORITY_LABELS, TASK_ASSIGNERS } from '@/lib/constants';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
+import { 
+  getAllMedicalOrganizationsSQLite, 
+  getAllTasksSQLite, 
+  updateTaskMoStatusSQLite 
+} from '@/lib/sqlite-db';
 
 interface OrganizationTaskListProps {
   organizations: MedicalOrganization[];
@@ -75,12 +84,14 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [assignerFilter, setAssignerFilter] = useState<string>('all');
-  const [startDateFilter, setStartDateFilter] = useState<string>('');
-  const [endDateFilter, setEndDateFilter] = useState<string>('');
+  const [startDateFilter, setStartDateFilter] = useState<Date | undefined>(undefined);
+  const [endDateFilter, setEndDateFilter] = useState<Date | undefined>(undefined);
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
   const [editingMoId, setEditingMoId] = useState<number | null>(null);
   const [editingPercentage, setEditingPercentage] = useState<string>('');
   const [editingComment, setEditingComment] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     loadTasks();
@@ -94,14 +105,30 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
 
   useEffect(() => {
     applySorting();
-  }, [orgTaskStats, sortKey, sortDirection, searchTerm, filterType, showOnlyWithTasks, assignerFilter, startDateFilter, endDateFilter]);
+  }, [orgTaskStats, sortKey, sortDirection, searchTerm, filterType, showOnlyWithTasks, assignerFilter, startDateFilter, endDateFilter, priorityFilter]);
 
   const loadTasks = async () => {
+    setIsLoading(true);
     try {
-      const allTasks = await getAllTasks();
+      // Try to load from SQLite first
+      let allTasks: Task[] = [];
+      try {
+        allTasks = await getAllTasksSQLite();
+        console.log('Tasks loaded from SQLite:', allTasks.length);
+      } catch (sqliteError) {
+        console.warn('Failed to load from SQLite, falling back to IndexedDB:', sqliteError);
+        allTasks = await getAllTasks();
+      }
       setTasks(allTasks);
     } catch (error) {
       console.error('Error loading tasks:', error);
+      toast({
+        title: "Ошибка загрузки",
+        description: "Не удалось загрузить задачи. Пожалуйста, попробуйте позже.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -113,24 +140,9 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       if (org.id === undefined) return;
 
       // Фильтрация задач по организации
-      let orgTasks = tasks.filter(task => {
+      const orgTasks = tasks.filter(task => {
         const isForThisOrg = task.moId === org.id || 
                            (task.moStatuses && task.moStatuses.some(status => status.moId === org.id));
-        
-        // Фильтрация по постановщику
-        if (assignerFilter !== 'all' && task.assignedBy !== assignerFilter) {
-          return false;
-        }
-        
-        // Фильтрация по дате начала
-        if (startDateFilter && new Date(task.startDate) < new Date(startDateFilter)) {
-          return false;
-        }
-        
-        // Фильтрация по дате окончания
-        if (endDateFilter && new Date(task.endDate) > new Date(endDateFilter)) {
-          return false;
-        }
         
         return isForThisOrg;
       });
@@ -140,7 +152,11 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       let tasksOverdue = 0;
 
       orgTasks.forEach(task => {
-        if (task.completionPercentage === 100) {
+        // Для конкретной организации смотрим статус в moStatuses
+        const moStatus = task.moStatuses?.find(status => status.moId === org.id);
+        const completionPercentage = moStatus ? moStatus.completionPercentage : task.completionPercentage;
+        
+        if (completionPercentage === 100) {
           tasksCompleted++;
         } else {
           tasksInProgress++;
@@ -152,9 +168,16 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
         }
       });
 
-      const completionPercent = orgTasks.length > 0
-        ? Math.round(orgTasks.reduce((acc, task) => acc + task.completionPercentage, 0) / orgTasks.length)
-        : 0;
+      // Вычисляем средний процент выполнения для организации
+      let completionPercent = 0;
+      if (orgTasks.length > 0) {
+        let totalPercent = 0;
+        orgTasks.forEach(task => {
+          const moStatus = task.moStatuses?.find(status => status.moId === org.id);
+          totalPercent += moStatus ? moStatus.completionPercentage : task.completionPercentage;
+        });
+        completionPercent = Math.round(totalPercent / orgTasks.length);
+      }
 
       stats.push({
         id: org.id,
@@ -174,12 +197,14 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const applySorting = () => {
     let filtered = [...orgTaskStats];
 
+    // Фильтрация по названию организации
     if (searchTerm) {
       filtered = filtered.filter(org => 
         org.name.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
+    // Фильтрация по типу организации (ВПО, ДПО, КС, КДЦ)
     if (filterType !== 'all') {
       filtered = filtered.filter(org => {
         if (filterType === 'ВПО') return org.name.includes('ВПО');
@@ -190,10 +215,85 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       });
     }
 
+    // Фильтрация по заданиям
     if (showOnlyWithTasks) {
       filtered = filtered.filter(org => org.tasksTotal > 0);
     }
 
+    // Применяем дополнительные фильтры к задачам организаций
+    filtered = filtered.map(org => {
+      // Создаем копию объекта, чтобы не менять оригинал
+      const newOrg = { ...org };
+      
+      // Фильтруем задачи организации
+      newOrg.tasks = org.tasks.filter(task => {
+        // Фильтр по постановщику
+        if (assignerFilter !== 'all' && task.assignedBy !== assignerFilter) {
+          return false;
+        }
+        
+        // Фильтр по дате начала
+        if (startDateFilter) {
+          const taskStartDate = new Date(task.startDate);
+          startDateFilter.setHours(0, 0, 0, 0); // Сбросить время
+          if (taskStartDate < startDateFilter) {
+            return false;
+          }
+        }
+        
+        // Фильтр по дате окончания
+        if (endDateFilter) {
+          const taskEndDate = new Date(task.endDate);
+          endDateFilter.setHours(23, 59, 59, 999); // Установить конец дня
+          if (taskEndDate > endDateFilter) {
+            return false;
+          }
+        }
+        
+        // Фильтр по приоритету (если функция будет реализована)
+        if (priorityFilter !== 'all' && task.priority && task.priority !== priorityFilter) {
+          return false;
+        }
+        
+        return true;
+      });
+      
+      // Обновляем статистику после фильтрации
+      const today = new Date();
+      let tasksCompleted = 0;
+      let tasksInProgress = 0;
+      let tasksOverdue = 0;
+      
+      newOrg.tasks.forEach(task => {
+        const moStatus = task.moStatuses?.find(status => status.moId === org.id);
+        const completionPercentage = moStatus ? moStatus.completionPercentage : task.completionPercentage;
+        
+        if (completionPercentage === 100) {
+          tasksCompleted++;
+        } else {
+          tasksInProgress++;
+          
+          const endDate = new Date(task.endDate);
+          if (endDate < today) {
+            tasksOverdue++;
+          }
+        }
+      });
+      
+      newOrg.tasksTotal = newOrg.tasks.length;
+      newOrg.tasksCompleted = tasksCompleted;
+      newOrg.tasksInProgress = tasksInProgress;
+      newOrg.tasksOverdue = tasksOverdue;
+      
+      return newOrg;
+    });
+    
+    // Отфильтровываем организации без задач после применения фильтров к задачам, если включен showOnlyWithTasks
+    if (showOnlyWithTasks) {
+      filtered = filtered.filter(org => org.tasksTotal > 0);
+    }
+
+    // Сортировка
     filtered.sort((a, b) => {
       if (sortKey === 'name') {
         return sortDirection === 'asc' 
@@ -224,15 +324,18 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     setSearchTerm('');
     setFilterType('all');
     setAssignerFilter('all');
+    setPriorityFilter('all');
     setShowOnlyWithTasks(false);
-    setStartDateFilter('');
-    setEndDateFilter('');
+    setStartDateFilter(undefined);
+    setEndDateFilter(undefined);
   };
 
-  const getStatusBadge = (task: Task) => {
+  const getStatusBadge = (task: Task, moId: number) => {
+    const moStatus = task.moStatuses?.find(status => status.moId === moId);
+    const completionPercentage = moStatus ? moStatus.completionPercentage : task.completionPercentage;
     const daysLeft = differenceInDays(new Date(task.endDate), new Date());
     
-    if (task.completionPercentage === 100) {
+    if (completionPercentage === 100) {
       return <Badge className="bg-status-ontime">Завершена</Badge>;
     } else if (daysLeft < 0) {
       return <Badge className="bg-status-overdue">Просрочена</Badge>;
@@ -288,11 +391,24 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
         return;
       }
       
-      await updateTaskMoStatus(editingTaskId, editingMoId, {
-        completionPercentage: percentage,
-        comment: editingComment,
-        lastUpdated: new Date().toISOString()
-      });
+      setIsLoading(true);
+      
+      // Пытаемся обновить в SQLite
+      try {
+        await updateTaskMoStatusSQLite(editingTaskId, editingMoId, {
+          completionPercentage: percentage,
+          comment: editingComment,
+          lastUpdated: new Date().toISOString()
+        });
+        console.log('Task status updated in SQLite');
+      } catch (sqliteError) {
+        console.warn('Failed to update in SQLite, falling back to IndexedDB:', sqliteError);
+        await updateTaskMoStatus(editingTaskId, editingMoId, {
+          completionPercentage: percentage,
+          comment: editingComment,
+          lastUpdated: new Date().toISOString()
+        });
+      }
       
       toast({
         title: "Статус обновлен",
@@ -308,6 +424,8 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
         description: "Не удалось обновить статус задачи",
         variant: "destructive"
       });
+    } finally {
+      setIsLoading(false);
     }
   };
   
@@ -316,6 +434,11 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     setEditingMoId(null);
     setEditingPercentage('');
     setEditingComment('');
+  };
+
+  const formatDate = (date?: Date) => {
+    if (!date) return '';
+    return format(date, 'dd.MM.yyyy');
   };
 
   return (
@@ -354,10 +477,9 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все типы</SelectItem>
-                    <SelectItem value="ВПО">ВПО</SelectItem>
-                    <SelectItem value="ДПО">ДПО</SelectItem>
-                    <SelectItem value="КС">КС</SelectItem>
-                    <SelectItem value="КДЦ">КДЦ</SelectItem>
+                    {Object.values(FILTER_TYPES).filter(type => type !== 'all').map(type => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 
@@ -377,6 +499,21 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                     ))}
                   </SelectContent>
                 </Select>
+
+                <Select
+                  value={priorityFilter}
+                  onValueChange={setPriorityFilter}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Приоритет" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все приоритеты</SelectItem>
+                    {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             
@@ -385,21 +522,53 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
               <div className="flex flex-col md:flex-row gap-4">
                 <div>
                   <p className="text-sm mb-1">Дата начала (от)</p>
-                  <Input
-                    type="date"
-                    value={startDateFilter}
-                    onChange={(e) => setStartDateFilter(e.target.value)}
-                    className="w-full md:w-auto"
-                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "w-full md:w-auto justify-start text-left font-normal",
+                          !startDateFilter && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {startDateFilter ? formatDate(startDateFilter) : "Выберите дату"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={startDateFilter}
+                        onSelect={setStartDateFilter}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div>
                   <p className="text-sm mb-1">Дата окончания (до)</p>
-                  <Input
-                    type="date"
-                    value={endDateFilter}
-                    onChange={(e) => setEndDateFilter(e.target.value)}
-                    className="w-full md:w-auto"
-                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "w-full md:w-auto justify-start text-left font-normal",
+                          !endDateFilter && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {endDateFilter ? formatDate(endDateFilter) : "Выберите дату"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={endDateFilter}
+                        onSelect={setEndDateFilter}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
               
@@ -424,158 +593,163 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
             </label>
           </div>
 
-          <div className="rounded-md border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead 
-                    className="cursor-pointer" 
-                    onClick={() => toggleSort('name')}
-                  >
-                    <div className="flex items-center">
-                      Организация
-                      {sortKey === 'name' && (
-                        <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="cursor-pointer text-center" 
-                    onClick={() => toggleSort('tasksTotal')}
-                  >
-                    <div className="flex items-center justify-center">
-                      Всего задач
-                      {sortKey === 'tasksTotal' && (
-                        <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="cursor-pointer text-center" 
-                    onClick={() => toggleSort('tasksCompleted')}
-                  >
-                    <div className="flex items-center justify-center">
-                      Завершено
-                      {sortKey === 'tasksCompleted' && (
-                        <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="cursor-pointer text-center" 
-                    onClick={() => toggleSort('tasksInProgress')}
-                  >
-                    <div className="flex items-center justify-center">
-                      В работе
-                      {sortKey === 'tasksInProgress' && (
-                        <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="cursor-pointer text-center" 
-                    onClick={() => toggleSort('tasksOverdue')}
-                  >
-                    <div className="flex items-center justify-center">
-                      Просрочено
-                      {sortKey === 'tasksOverdue' && (
-                        <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-center">Прогресс</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedOrgStats.length === 0 ? (
+          {isLoading ? (
+            <div className="text-center py-6">
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
+              <p className="mt-2 text-muted-foreground">Загрузка данных...</p>
+            </div>
+          ) : (
+            <div className="rounded-md border overflow-hidden">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
-                      Организации не найдены
-                    </TableCell>
+                    <TableHead 
+                      className="cursor-pointer" 
+                      onClick={() => toggleSort('name')}
+                    >
+                      <div className="flex items-center">
+                        Организация
+                        {sortKey === 'name' && (
+                          <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer text-center" 
+                      onClick={() => toggleSort('tasksTotal')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Всего задач
+                        {sortKey === 'tasksTotal' && (
+                          <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer text-center" 
+                      onClick={() => toggleSort('tasksCompleted')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Завершено
+                        {sortKey === 'tasksCompleted' && (
+                          <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer text-center" 
+                      onClick={() => toggleSort('tasksInProgress')}
+                    >
+                      <div className="flex items-center justify-center">
+                        В работе
+                        {sortKey === 'tasksInProgress' && (
+                          <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer text-center" 
+                      onClick={() => toggleSort('tasksOverdue')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Просрочено
+                        {sortKey === 'tasksOverdue' && (
+                          <ArrowUpDown className={`ml-2 h-4 w-4 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead className="text-center">Прогресс</TableHead>
                   </TableRow>
-                ) : (
-                  sortedOrgStats.map((org) => (
-                    <React.Fragment key={org.id}>
-                      <TableRow 
-                        className={`hover:bg-muted/50 ${org.tasksTotal > 0 ? 'cursor-pointer' : ''}`}
-                        onClick={() => org.tasksTotal > 0 && toggleOrgExpanded(org.id)}
-                      >
-                        <TableCell className="font-medium">
-                          {org.name}
-                        </TableCell>
-                        <TableCell className="text-center">{org.tasksTotal}</TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-status-ontime">{org.tasksCompleted}</span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-status-delayed">{org.tasksInProgress}</span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-status-overdue">{org.tasksOverdue}</span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center space-x-2">
-                            <Progress value={org.completionPercent} className="h-2" />
-                            <span className="text-xs font-medium">{org.completionPercent}%</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      {org.tasksTotal > 0 && expandedOrgs[org.id] && (
-                        <TableRow>
-                          <TableCell colSpan={6} className="p-0 border-t-0">
-                            <div className="pl-6 pr-4 py-2 bg-muted/20">
-                              <h4 className="text-sm font-semibold mb-2">Список задач</h4>
-                              <div className="space-y-3">
-                                {org.tasks.map(task => (
-                                  <div 
-                                    key={task.id} 
-                                    className="bg-card border rounded-md p-3 relative hover:bg-muted/30 transition-colors"
-                                  >
-                                    <div className="flex justify-between mb-2">
-                                      <h5 className="font-medium">{task.title}</h5>
-                                      <div className="flex items-center space-x-2">
-                                        {getStatusBadge(task)}
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-6 w-6"
-                                          onClick={(e) => handleViewTaskDetails(task, e)}
-                                          title="Просмотреть детали"
-                                        >
-                                          <Eye size={14} />
-                                        </Button>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-6 w-6"
-                                          onClick={(e) => handleEditTask(task, e)}
-                                          title="Редактировать задачу"
-                                        >
-                                          <Pencil size={14} />
-                                        </Button>
+                </TableHeader>
+                <TableBody>
+                  {sortedOrgStats.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
+                        Организации не найдены
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sortedOrgStats.map((org) => (
+                      <React.Fragment key={org.id}>
+                        <TableRow 
+                          className={`hover:bg-muted/50 ${org.tasksTotal > 0 ? 'cursor-pointer' : ''}`}
+                          onClick={() => org.tasksTotal > 0 && toggleOrgExpanded(org.id)}
+                        >
+                          <TableCell className="font-medium">
+                            {org.name}
+                          </TableCell>
+                          <TableCell className="text-center">{org.tasksTotal}</TableCell>
+                          <TableCell className="text-center">
+                            <span className="text-status-ontime">{org.tasksCompleted}</span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <span className="text-status-delayed">{org.tasksInProgress}</span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <span className="text-status-overdue">{org.tasksOverdue}</span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-2">
+                              <Progress value={org.completionPercent} className="h-2" />
+                              <span className="text-xs font-medium">{org.completionPercent}%</span>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {org.tasksTotal > 0 && expandedOrgs[org.id] && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="p-0 border-t-0">
+                              <div className="pl-6 pr-4 py-2 bg-muted/20">
+                                <h4 className="text-sm font-semibold mb-2">Список задач</h4>
+                                <div className="space-y-3">
+                                  {org.tasks.map(task => (
+                                    <div 
+                                      key={task.id} 
+                                      className="bg-card border rounded-md p-3 relative hover:bg-muted/30 transition-colors"
+                                    >
+                                      <div className="flex justify-between mb-2">
+                                        <h5 className="font-medium">{task.title}</h5>
+                                        <div className="flex items-center space-x-2">
+                                          {getStatusBadge(task, org.id)}
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6"
+                                            onClick={(e) => handleViewTaskDetails(task, e)}
+                                            title="Просмотреть детали"
+                                          >
+                                            <Eye size={14} />
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6"
+                                            onClick={(e) => handleEditTask(task, e)}
+                                            title="Редактировать задачу"
+                                          >
+                                            <Pencil size={14} />
+                                          </Button>
+                                        </div>
                                       </div>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mb-2">
-                                      {task.description.length > 100 
-                                        ? `${task.description.substring(0, 100)}...` 
-                                        : task.description}
-                                    </div>
-                                    <div className="flex justify-between text-xs">
-                                      <div>
-                                        Срок: {format(new Date(task.startDate), 'dd.MM.yyyy', { locale: ru })} - 
-                                        {format(new Date(task.endDate), 'dd.MM.yyyy', { locale: ru })}
+                                      <div className="text-xs text-muted-foreground mb-2">
+                                        {task.description.length > 100 
+                                          ? `${task.description.substring(0, 100)}...` 
+                                          : task.description}
                                       </div>
-                                      <div className="flex items-center space-x-2">
-                                        <Progress value={task.completionPercentage} className="h-1.5 w-20" />
-                                        <span>{task.completionPercentage}%</span>
+                                      <div className="flex justify-between text-xs">
+                                        <div>
+                                          Срок: {format(new Date(task.startDate), 'dd.MM.yyyy', { locale: ru })} - 
+                                          {format(new Date(task.endDate), 'dd.MM.yyyy', { locale: ru })}
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <Progress value={task.completionPercentage} className="h-1.5 w-20" />
+                                          <span>{task.completionPercentage}%</span>
+                                        </div>
                                       </div>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-2">
-                                      Постановщик: {task.assignedBy || "Не указан"}
-                                    </div>
-                                    
-                                    {/* Статус для данной организации */}
-                                    {task.moStatuses && task.moStatuses.find(status => status.moId === org.id) && (
+                                      <div className="text-xs text-muted-foreground mt-2">
+                                        Постановщик: {task.assignedBy || "Не указан"}
+                                      </div>
+                                      
+                                      {/* Статус для данной организации */}
                                       <div className="mt-4 pt-2 border-t">
                                         <div className="flex justify-between items-center">
                                           <h6 className="text-xs font-semibold">Статус выполнения в организации:</h6>
@@ -589,6 +763,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                                   e.stopPropagation();
                                                   handleSaveStatus();
                                                 }}
+                                                disabled={isLoading}
                                               >
                                                 <Check size={12} />
                                               </Button>
@@ -600,6 +775,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                                   e.stopPropagation();
                                                   resetEditingState();
                                                 }}
+                                                disabled={isLoading}
                                               >
                                                 <X size={12} />
                                               </Button>
@@ -612,10 +788,16 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 const moStatus = task.moStatuses?.find(status => status.moId === org.id);
-                                                if (moStatus && task.id) {
-                                                  handleEditStatus(task.id, org.id, moStatus.completionPercentage, moStatus.comment);
+                                                if (task.id) {
+                                                  handleEditStatus(
+                                                    task.id, 
+                                                    org.id, 
+                                                    moStatus ? moStatus.completionPercentage : task.completionPercentage,
+                                                    moStatus?.comment || ''
+                                                  );
                                                 }
                                               }}
+                                              disabled={isLoading}
                                             >
                                               Изменить
                                             </Button>
@@ -647,7 +829,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                           </div>
                                         ) : (
                                           <>
-                                            {task.moStatuses
+                                            {task.moStatuses && task.moStatuses
                                               .filter(status => status.moId === org.id)
                                               .map(status => (
                                                 <div key={`${task.id}-${status.moId}`} className="mt-1">
@@ -660,25 +842,45 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                                       {status.comment}
                                                     </div>
                                                   )}
+                                                  {status.lastUpdated && (
+                                                    <div className="text-xs text-muted-foreground mt-1">
+                                                      Обновлено: {format(
+                                                        parseISO(status.lastUpdated), 
+                                                        'dd.MM.yyyy HH:mm', 
+                                                        { locale: ru }
+                                                      )}
+                                                    </div>
+                                                  )}
                                                 </div>
                                               ))}
+                                            {(!task.moStatuses || !task.moStatuses.some(status => status.moId === org.id)) && (
+                                              <div className="mt-1">
+                                                <div className="flex items-center space-x-2">
+                                                  <Progress value={task.completionPercentage} className="h-1.5 w-20" />
+                                                  <span className="text-xs">{task.completionPercentage}%</span>
+                                                </div>
+                                                <div className="text-xs text-muted-foreground mt-1">
+                                                  Используется общий процент выполнения задачи
+                                                </div>
+                                              </div>
+                                            )}
                                           </>
                                         )}
                                       </div>
-                                    )}
-                                  </div>
-                                ))}
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </React.Fragment>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
