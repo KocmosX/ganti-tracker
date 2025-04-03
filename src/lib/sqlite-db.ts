@@ -184,7 +184,15 @@ export const authenticateUserSQLite = async (username: string, password: string)
     const result = stmt.step();
     
     if (result) {
-      const user = stmt.getAsObject() as User;
+      // Fixing the TS2352 error with a type assertion
+      const userObj = stmt.getAsObject();
+      const user: User = {
+        id: userObj.id as number,
+        username: userObj.username as string,
+        password: '', // Will be removed in the next step
+        isAdmin: Boolean(userObj.isAdmin)
+      };
+      
       stmt.free();
       const { password: _, ...userWithoutPassword } = user;
       return userWithoutPassword;
@@ -233,19 +241,24 @@ export const getAllTasksSQLite = async (): Promise<Task[]> => {
     
     if (tasksResult.length === 0 || !tasksResult[0].values) return [];
     
-    const tasks = tasksResult[0].values.map(row => ({
-      id: row[0] as number,
-      title: row[1] as string,
-      description: row[2] as string,
-      moId: row[3] as number,
-      startDate: row[4] as string,
-      endDate: row[5] as string,
-      assignedBy: row[6] as string,
-      completionPercentage: row[7] as number,
-      status: row[8] as TaskStatus,
-      result: row[9] as string | undefined,
-      comment: row[10] as string | undefined
-    }));
+    const tasks = tasksResult[0].values.map(row => {
+      // Create Task object with the moStatuses property
+      const task: Task = {
+        id: row[0] as number,
+        title: row[1] as string,
+        description: row[2] as string,
+        moId: row[3] as number,
+        startDate: row[4] as string,
+        endDate: row[5] as string,
+        assignedBy: row[6] as string,
+        completionPercentage: row[7] as number,
+        status: row[8] as TaskStatus,
+        result: row[9] as string | undefined,
+        comment: row[10] as string | undefined,
+        moStatuses: [] // Initialize empty array
+      };
+      return task;
+    });
     
     // Получаем статусы по МО для каждой задачи
     for (const task of tasks) {
@@ -365,7 +378,8 @@ export const updateTaskSQLite = async (id: number, taskData: Partial<Omit<Task, 
       completionPercentage: taskRow[7] as number,
       status: taskRow[8] as TaskStatus,
       result: taskRow[9] as string | undefined,
-      comment: taskRow[10] as string | undefined
+      comment: taskRow[10] as string | undefined,
+      moStatuses: [] // Initialize with empty array
     };
     
     // Объединяем текущую задачу с данными обновления
@@ -520,7 +534,8 @@ export const updateTaskMoStatusSQLite = async (
       completionPercentage: taskRow[7] as number,
       status: taskRow[8] as TaskStatus,
       result: taskRow[9] as string | undefined,
-      comment: taskRow[10] as string | undefined
+      comment: taskRow[10] as string | undefined,
+      moStatuses: [] // Initialize with empty array
     };
     
     // Получаем обновленные статусы МО
