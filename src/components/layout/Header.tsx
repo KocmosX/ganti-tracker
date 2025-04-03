@@ -1,39 +1,50 @@
 
-import React from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { Button } from '@/components/ui/button';
-import { LogOut, User } from 'lucide-react';
+import { Button } from "../ui/button";
+import { useAuth } from "../../lib/auth-context";
+import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
+import { Link, useLocation } from "react-router-dom";
+import { Database, LogOut } from "lucide-react";
 
-const Header: React.FC = () => {
-  const { user, logout, isGuest } = useAuth();
+export default function Header() {
+  const { user, logout } = useAuth();
+  const location = useLocation();
 
   return (
-    <header className="bg-medical py-4 px-6 flex justify-between items-center text-white">
-      <div className="flex items-center space-x-4">
-        <h1 className="text-xl font-bold">Система мониторинга задач</h1>
-      </div>
-      
-      <div className="flex items-center space-x-4">
-        {(user || isGuest) && (
-          <>
-            <div className="flex items-center space-x-2">
-              <User size={18} />
-              <span>{user ? user.username : 'Гость'}</span>
+    <header className="sticky top-0 z-50 w-full bg-background shadow">
+      <div className="container flex h-16 items-center justify-between space-x-4 sm:space-x-0">
+        <div className="flex items-center space-x-4">
+          <span className="text-lg font-bold">Система управления задачами</span>
+        </div>
+        <div className="flex items-center space-x-4">
+          {user && (
+            <Tabs defaultValue={location.pathname} className="hidden md:block">
+              <TabsList>
+                <TabsTrigger value="/" asChild>
+                  <Link to="/">Главная</Link>
+                </TabsTrigger>
+                {user.isAdmin && (
+                  <TabsTrigger value="/database" asChild>
+                    <Link to="/database">
+                      <Database className="mr-2 h-4 w-4" />
+                      База данных
+                    </Link>
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </Tabs>
+          )}
+          {user && (
+            <div className="flex items-center space-x-4">
+              <div className="text-sm hidden sm:block">
+                {user.username} ({user.isAdmin ? "Администратор" : "Пользователь"})
+              </div>
+              <Button variant="ghost" size="icon" onClick={logout} title="Выйти">
+                <LogOut className="h-5 w-5" />
+              </Button>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="text-white border-white hover:bg-medical-dark"
-              onClick={logout}
-            >
-              <LogOut size={16} className="mr-2" />
-              Выйти
-            </Button>
-          </>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );
-};
-
-export default Header;
+}

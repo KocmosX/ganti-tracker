@@ -592,3 +592,102 @@ export const exportSqliteDatabase = (): Uint8Array | null => {
   if (!db) return null;
   return db.export();
 };
+
+// Новые функции для экспорта и скачивания базы данных
+
+// Функция для экспорта базы данных в файл
+export const exportDatabaseToFile = async (): Promise<void> => {
+  try {
+    await initSqliteDb(); // Убедимся, что база данных инициализирована
+    
+    if (!db) {
+      throw new Error('База данных не инициализирована');
+    }
+    
+    // Экспортируем базу данных в Uint8Array
+    const binaryArray = db.export();
+    
+    // Создаем Blob из бинарных данных
+    const blob = new Blob([binaryArray], { type: 'application/x-sqlite3' });
+    
+    // Создаем ссылку для скачивания
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'task-management-database.sqlite';
+    
+    // Добавляем ссылку на страницу, эмулируем клик и удаляем ссылку
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Освобождаем URL
+    URL.revokeObjectURL(url);
+    
+    console.log('База данных успешно экспортирована в файл');
+  } catch (error) {
+    console.error('Ошибка при экспорте базы данных в файл:', error);
+    throw error;
+  }
+};
+
+// Функция для загрузки базы данных из файла
+export const importDatabaseFromFile = async (file: File): Promise<void> => {
+  try {
+    // Проверяем, что файл имеет правильное расширение
+    if (!file.name.endsWith('.sqlite') && !file.name.endsWith('.db')) {
+      throw new Error('Неверный формат файла. Ожидается файл .sqlite или .db');
+    }
+    
+    // Читаем файл как ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Инициализируем SQLite, если еще не инициализирован
+    if (!SQL) {
+      SQL = await initSqlJs({
+        locateFile: () => SQL_WASM_PATH
+      });
+    }
+    
+    // Создаем новый экземпляр базы данных из файла
+    db = new SQL.Database(uint8Array);
+    
+    // Сохраняем базу данных в localStorage для последующего использования
+    saveDatabase();
+    
+    console.log('База данных успешно импортирована из файла');
+  } catch (error) {
+    console.error('Ошибка при импорте базы данных из файла:', error);
+    throw error;
+  }
+};
+
+// Функция для создания новой пустой базы данных
+export const createNewEmptyDatabase = async (): Promise<void> => {
+  try {
+    // Инициализируем SQLite, если еще не инициализирован
+    if (!SQL) {
+      SQL = await initSqlJs({
+        locateFile: () => SQL_WASM_PATH
+      });
+    }
+    
+    // Создаем новый экземпляр пустой базы данных
+    db = new SQL.Database();
+    
+    // Создаем структуру таблиц
+    createTables();
+    
+    // Сохраняем базу данных в localStorage
+    saveDatabase();
+    
+    // Экспортируем новую базу данных в файл
+    await exportDatabaseToFile();
+    
+    console.log('Новая пустая база данных создана и экспортирована');
+  } catch (error) {
+    console.error('Ошибка при создании новой пустой базы данных:', error);
+    throw error;
+  }
+};
