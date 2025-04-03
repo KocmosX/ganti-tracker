@@ -1,5 +1,5 @@
-
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import { PRIORITY_LEVELS } from './constants';
 
 export enum TaskStatus {
   NotStarted = 'Не начата',
@@ -39,6 +39,7 @@ export interface Task {
   result?: string;
   comment?: string;
   moStatuses?: TaskMoStatus[]; // Статусы выполнения по каждой МО
+  priority?: string; // Добавляем поле приоритета
 }
 
 interface TaskDB extends DBSchema {

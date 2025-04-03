@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -110,7 +109,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const loadTasks = async () => {
     setIsLoading(true);
     try {
-      // Try to load from SQLite first
       let allTasks: Task[] = [];
       try {
         allTasks = await getAllTasksSQLite();
@@ -139,7 +137,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     organizations.forEach(org => {
       if (org.id === undefined) return;
 
-      // Фильтрация задач по организации
       const orgTasks = tasks.filter(task => {
         const isForThisOrg = task.moId === org.id || 
                            (task.moStatuses && task.moStatuses.some(status => status.moId === org.id));
@@ -152,7 +149,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       let tasksOverdue = 0;
 
       orgTasks.forEach(task => {
-        // Для конкретной организации смотрим статус в moStatuses
         const moStatus = task.moStatuses?.find(status => status.moId === org.id);
         const completionPercentage = moStatus ? moStatus.completionPercentage : task.completionPercentage;
         
@@ -168,7 +164,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
         }
       });
 
-      // Вычисляем средний процент выполнения для организации
       let completionPercent = 0;
       if (orgTasks.length > 0) {
         let totalPercent = 0;
@@ -197,14 +192,12 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const applySorting = () => {
     let filtered = [...orgTaskStats];
 
-    // Фильтрация по названию организации
     if (searchTerm) {
       filtered = filtered.filter(org => 
         org.name.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
-    // Фильтрация по типу организации (ВПО, ДПО, КС, КДЦ)
     if (filterType !== 'all') {
       filtered = filtered.filter(org => {
         if (filterType === 'ВПО') return org.name.includes('ВПО');
@@ -215,51 +208,43 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       });
     }
 
-    // Фильтрация по заданиям
     if (showOnlyWithTasks) {
       filtered = filtered.filter(org => org.tasksTotal > 0);
     }
 
-    // Применяем дополнительные фильтры к задачам организаций
     filtered = filtered.map(org => {
-      // Создаем копию объекта, чтобы не менять оригинал
       const newOrg = { ...org };
       
-      // Фильтруем задачи организации
       newOrg.tasks = org.tasks.filter(task => {
-        // Фильтр по постановщику
         if (assignerFilter !== 'all' && task.assignedBy !== assignerFilter) {
           return false;
         }
         
-        // Фильтр по дате начала
         if (startDateFilter) {
           const taskStartDate = new Date(task.startDate);
-          startDateFilter.setHours(0, 0, 0, 0); // Сбросить время
+          startDateFilter.setHours(0, 0, 0, 0);
           if (taskStartDate < startDateFilter) {
             return false;
           }
         }
         
-        // Фильтр по дате окончания
         if (endDateFilter) {
           const taskEndDate = new Date(task.endDate);
-          endDateFilter.setHours(23, 59, 59, 999); // Установить конец дня
+          endDateFilter.setHours(23, 59, 59, 999);
           if (taskEndDate > endDateFilter) {
             return false;
           }
         }
         
-        // Фильтр по приоритету (если функция будет реализована)
-        if (priorityFilter !== 'all' && task.priority && task.priority !== priorityFilter) {
+        if (priorityFilter !== 'all' && task.priority && priorityFilter === task.priority) {
+          return true;
+        } else if (priorityFilter !== 'all') {
           return false;
         }
         
         return true;
       });
       
-      // Обновляем статистику после фильтрации
-      const today = new Date();
       let tasksCompleted = 0;
       let tasksInProgress = 0;
       let tasksOverdue = 0;
@@ -288,12 +273,10 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       return newOrg;
     });
     
-    // Отфильтровываем организации без задач после применения фильтров к задачам, если включен showOnlyWithTasks
     if (showOnlyWithTasks) {
       filtered = filtered.filter(org => org.tasksTotal > 0);
     }
 
-    // Сортировка
     filtered.sort((a, b) => {
       if (sortKey === 'name') {
         return sortDirection === 'asc' 
@@ -393,7 +376,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
       
       setIsLoading(true);
       
-      // Пытаемся обновить в SQLite
       try {
         await updateTaskMoStatusSQLite(editingTaskId, editingMoId, {
           completionPercentage: percentage,
@@ -454,7 +436,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4 mb-4">
-            {/* Первая строка фильтров */}
             <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1 flex items-center space-x-2">
                 <Input
@@ -517,7 +498,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
               </div>
             </div>
             
-            {/* Вторая строка фильтров */}
             <div className="flex flex-col md:flex-row gap-4 items-end">
               <div className="flex flex-col md:flex-row gap-4">
                 <div>
@@ -749,7 +729,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                         Постановщик: {task.assignedBy || "Не указан"}
                                       </div>
                                       
-                                      {/* Статус для данной организации */}
                                       <div className="mt-4 pt-2 border-t">
                                         <div className="flex justify-between items-center">
                                           <h6 className="text-xs font-semibold">Статус выполнения в организации:</h6>
