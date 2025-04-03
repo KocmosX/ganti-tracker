@@ -191,6 +191,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
 
   const applySorting = () => {
     let filtered = [...orgTaskStats];
+    const today = new Date(); // Add this line to define 'today'
 
     if (searchTerm) {
       filtered = filtered.filter(org => 
