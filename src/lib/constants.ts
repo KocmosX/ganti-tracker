@@ -10,6 +10,7 @@ export const TASK_ASSIGNERS = [
 ];
 
 export const USER_FULL_NAMES = {
+  'admin': 'Администратор',
   'evbelugina': 'Белугина Елена Владимировна',
   'yvnikitenko': 'Никитенко Юлия Владимировна',
   'nvizmaylova': 'Измайлова Наталья Викторовна',

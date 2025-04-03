@@ -119,6 +119,12 @@ const createTables = () => {
 const seedInitialData = async () => {
   if (!db) return;
   
+  // Добавляем административного пользователя
+  db.exec(`
+    INSERT OR IGNORE INTO users (username, password, isAdmin)
+    VALUES ('admin', 'admin', 1)
+  `);
+  
   // Список администраторов
   const adminUsers = [
     { username: 'evbelugina', password: 'evbelugina', isAdmin: 1, fullName: 'Белугина Елена Владимировна' },

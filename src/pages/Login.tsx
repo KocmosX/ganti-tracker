@@ -15,6 +15,7 @@ const Login: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [initializingDb, setInitializingDb] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
   const { user, login, loading, error, isGuest, loginAsGuest } = useAuth();
 
   useEffect(() => {
@@ -22,13 +23,20 @@ const Login: React.FC = () => {
       try {
         await initSqliteDb();
         setInitializingDb(false);
+        console.log('База данных успешно инициализирована');
       } catch (err) {
         console.error('Ошибка при инициализации базы данных:', err);
+        setInitError('Ошибка при инициализации базы данных. Попробуйте обновить страницу.');
         setInitializingDb(false);
       }
     };
     
-    initDb();
+    // Установка небольшой задержки, чтобы сначала отрисовался UI
+    const timer = setTimeout(() => {
+      initDb();
+    }, 300);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   if (user || isGuest) {
@@ -40,12 +48,31 @@ const Login: React.FC = () => {
     await login(username, password);
   };
 
+  const handleQuickAdminLogin = () => {
+    setUsername('admin');
+    setPassword('admin');
+    login('admin', 'admin');
+  };
+
   if (initializingDb) {
     return (
       <MainLayout>
         <div className="flex flex-col items-center justify-center min-h-[80vh]">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
           <p className="text-lg">Инициализация базы данных...</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  if (initError) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center min-h-[80vh]">
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{initError}</AlertDescription>
+          </Alert>
+          <Button onClick={() => window.location.reload()}>Обновить страницу</Button>
         </div>
       </MainLayout>
     );
@@ -107,7 +134,7 @@ const Login: React.FC = () => {
               </Button>
             </form>
           </CardContent>
-          <CardFooter>
+          <CardFooter className="flex-col space-y-2">
             <Button
               variant="outline"
               className="w-full"
@@ -115,6 +142,14 @@ const Login: React.FC = () => {
             >
               <User className="mr-2 h-4 w-4" />
               Войти как гость
+            </Button>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={handleQuickAdminLogin}
+            >
+              <LogIn className="mr-2 h-4 w-4" />
+              Войти как Admin
             </Button>
           </CardFooter>
         </Card>
