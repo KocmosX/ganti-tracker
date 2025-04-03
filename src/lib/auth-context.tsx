@@ -1,5 +1,7 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, authenticateUser } from './db';
+import { User } from './db';
+import { authenticateUserSQLite } from './sqlite-db';
 import { useToast } from '@/hooks/use-toast';
 
 interface AuthContextType {
@@ -39,7 +41,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     
     try {
-      const authenticatedUser = await authenticateUser(username, password);
+      // Используем SQLite для авторизации
+      const authenticatedUser = await authenticateUserSQLite(username, password);
       
       if (authenticatedUser) {
         setUser(authenticatedUser);

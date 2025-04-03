@@ -1,18 +1,35 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogIn, User } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { LogIn, User, Loader2 } from 'lucide-react';
+import { initSqliteDb } from '@/lib/sqlite-db';
 import MainLayout from '@/components/layout/MainLayout';
 
 const Login: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [initializingDb, setInitializingDb] = useState(true);
   const { user, login, loading, error, isGuest, loginAsGuest } = useAuth();
+
+  useEffect(() => {
+    const initDb = async () => {
+      try {
+        await initSqliteDb();
+        setInitializingDb(false);
+      } catch (err) {
+        console.error('Ошибка при инициализации базы данных:', err);
+        setInitializingDb(false);
+      }
+    };
+    
+    initDb();
+  }, []);
 
   if (user || isGuest) {
     return <Navigate to="/" replace />;
@@ -22,6 +39,17 @@ const Login: React.FC = () => {
     e.preventDefault();
     await login(username, password);
   };
+
+  if (initializingDb) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center min-h-[80vh]">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+          <p className="text-lg">Инициализация базы данных...</p>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>
@@ -56,7 +84,9 @@ const Login: React.FC = () => {
                 />
               </div>
               {error && (
-                <div className="text-destructive text-sm">{error}</div>
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
               <Button
                 type="submit"
@@ -65,10 +95,7 @@ const Login: React.FC = () => {
               >
                 {loading ? (
                   <span className="flex items-center">
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Вход...
                   </span>
                 ) : (
