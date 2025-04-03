@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,12 +27,13 @@ interface TaskFormProps {
 
 // Предопределенный список возможных постановщиков задач
 const TASK_ASSIGNERS = [
-  'Администратор',
-  'Руководитель',
-  'Менеджер',
-  'Координатор',
-  'Аналитик',
-  'Главврач',
+  'Белугина Елена Владимировна',
+  'Никитенко Юлия Владимировна',
+  'Измайлова Наталья Викторовна',
+  'Миронова Наталья Владимировна',
+  'Бакулина Наталья Евгеньевна',
+  'Кноль Анна Сергеевна',
+  'Ковалева Наталья Викторовна',
 ];
 
 const TaskForm: React.FC<TaskFormProps> = ({ 

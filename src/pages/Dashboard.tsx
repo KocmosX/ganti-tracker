@@ -186,7 +186,8 @@ const Dashboard: React.FC = () => {
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="organizations">По организациям</TabsTrigger>
-          <TabsTrigger value="list">Список задач</TabsTrigger>
+          <TabsTrigger value="list">Активные задачи</TabsTrigger>
+          <TabsTrigger value="completed">Завершённые задачи</TabsTrigger>
           <TabsTrigger value="gantt">Диаграмма Ганта</TabsTrigger>
         </TabsList>
         <TabsContent value="organizations" className="space-y-4">
@@ -202,6 +203,16 @@ const Dashboard: React.FC = () => {
             onTaskCreate={handleCreateTask}
             onTaskEdit={handleEditTask}
             refreshTasks={refreshTrigger}
+            showCompleted={false}
+          />
+        </TabsContent>
+        <TabsContent value="completed" className="space-y-4">
+          <TaskList 
+            organizations={organizations}
+            onTaskCreate={handleCreateTask}
+            onTaskEdit={handleEditTask}
+            refreshTasks={refreshTrigger}
+            showCompleted={true}
           />
         </TabsContent>
         <TabsContent value="gantt">

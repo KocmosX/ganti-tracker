@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit, Check, X, ExternalLink } from 'lucide-react';
+import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit, Check as CheckIcon, X as XIcon, ExternalLink } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Task, MedicalOrganization, getAllTasks, getMedicalOrganizationById, deleteTask, updateTaskMoStatus } from '@/lib/db';
+import { Task, MedicalOrganization, getAllTasks, getMedicalOrganizationById, deleteTask, updateTaskMoStatus, updateTask } from '@/lib/db';
 import { useToast } from '@/hooks/use-toast';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Progress } from '@/components/ui/progress';
@@ -22,13 +22,26 @@ interface TaskListProps {
   onTaskCreate: () => void;
   onTaskEdit: (task: Task) => void;
   refreshTasks: boolean;
+  showCompleted?: boolean;
 }
+
+// Предопределенный список возможных постановщиков задач
+const TASK_ASSIGNERS = [
+  'Белугина Елена Владимировна',
+  'Никитенко Юлия Владимировна',
+  'Измайлова Наталья Викторовна',
+  'Миронова Наталья Владимировна',
+  'Бакулина Наталья Евгеньевна',
+  'Кноль Анна Сергеевна',
+  'Ковалева Наталья Викторовна',
+];
 
 const TaskList: React.FC<TaskListProps> = ({ 
   organizations, 
   onTaskCreate, 
   onTaskEdit,
-  refreshTasks
+  refreshTasks,
+  showCompleted = false
 }) => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -36,6 +49,7 @@ const TaskList: React.FC<TaskListProps> = ({
   const [filteredTasks, setFilteredTasks] = useState<Task[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMo, setSelectedMo] = useState<string>('all');
+  const [selectedAssigner, setSelectedAssigner] = useState<string>('all');
   const [organizationNames, setOrganizationNames] = useState<Record<number, string>>({});
   const [taskToDelete, setTaskToDelete] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -44,6 +58,8 @@ const TaskList: React.FC<TaskListProps> = ({
   const [editingMoId, setEditingMoId] = useState<number | null>(null);
   const [editingPercentage, setEditingPercentage] = useState<string>('');
   const [editingComment, setEditingComment] = useState<string>('');
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editingTaskPercentage, setEditingTaskPercentage] = useState<string>('');
 
   useEffect(() => {
     loadTasks();
@@ -64,7 +80,7 @@ const TaskList: React.FC<TaskListProps> = ({
   useEffect(() => {
     filterTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, selectedMo, tasks]);
+  }, [searchTerm, selectedMo, selectedAssigner, tasks, showCompleted]);
 
   const loadTasks = async () => {
     try {
@@ -82,6 +98,13 @@ const TaskList: React.FC<TaskListProps> = ({
 
   const filterTasks = () => {
     let filtered = [...tasks];
+    
+    // Filter by completion status
+    if (showCompleted) {
+      filtered = filtered.filter(task => task.completionPercentage === 100);
+    } else {
+      filtered = filtered.filter(task => task.completionPercentage < 100);
+    }
 
     if (selectedMo && selectedMo !== 'all') {
       filtered = filtered.filter(task => {
@@ -95,6 +118,10 @@ const TaskList: React.FC<TaskListProps> = ({
         
         return false;
       });
+    }
+
+    if (selectedAssigner && selectedAssigner !== 'all') {
+      filtered = filtered.filter(task => task.assignedBy === selectedAssigner);
     }
 
     if (searchTerm.trim()) {
@@ -135,6 +162,7 @@ const TaskList: React.FC<TaskListProps> = ({
   const resetFilters = () => {
     setSearchTerm('');
     setSelectedMo('all');
+    setSelectedAssigner('all');
   };
 
   const calculateDaysLeft = (endDateStr: string) => {
@@ -179,6 +207,8 @@ const TaskList: React.FC<TaskListProps> = ({
     setEditingMoId(null);
     setEditingPercentage('');
     setEditingComment('');
+    setEditingTaskId(null);
+    setEditingTaskPercentage('');
   };
 
   const handleEdit = (taskId: number | undefined, moId: number, percentage: number, comment: string = '') => {
@@ -187,6 +217,13 @@ const TaskList: React.FC<TaskListProps> = ({
     setEditingMoId(moId);
     setEditingPercentage(percentage.toString());
     setEditingComment(comment);
+  };
+
+  const handleEditTask = (task: Task) => {
+    if (!task.id) return;
+    
+    setEditingTaskId(task.id);
+    setEditingTaskPercentage(task.completionPercentage.toString());
   };
 
   const handleSave = async (taskId: number | undefined) => {
@@ -205,7 +242,44 @@ const TaskList: React.FC<TaskListProps> = ({
 
       await updateTaskMoStatus(taskId, editingMoId, {
         completionPercentage: percentage,
-        comment: editingComment
+        comment: editingComment,
+        lastUpdated: new Date().toISOString()
+      });
+
+      toast({
+        title: "Статус обновлен",
+        description: "Статус выполнения задачи успешно обновлен",
+      });
+
+      loadTasks();
+      resetEditingState();
+    } catch (error) {
+      console.error('Ошибка при обновлении статуса:', error);
+      toast({
+        title: "Ошибка",
+        description: "Не удалось обновить статус выполнения",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSaveTaskStatus = async (task: Task) => {
+    if (!task.id || !editingTaskId) return;
+
+    try {
+      const percentage = parseInt(editingTaskPercentage);
+      if (isNaN(percentage) || percentage < 0 || percentage > 100) {
+        toast({
+          title: "Ошибка",
+          description: "Процент выполнения должен быть числом от 0 до 100",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await updateTask(task.id, {
+        ...task,
+        completionPercentage: percentage
       });
 
       toast({
@@ -229,7 +303,7 @@ const TaskList: React.FC<TaskListProps> = ({
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle>Список задач</CardTitle>
+          <CardTitle>{showCompleted ? "Завершённые задачи" : "Активные задачи"}</CardTitle>
           <Button onClick={onTaskCreate}>
             <Plus className="mr-2 h-4 w-4" />
             Новая задача
@@ -261,9 +335,30 @@ const TaskList: React.FC<TaskListProps> = ({
                   {organizations.map((org) => (
                     <SelectItem 
                       key={org.id} 
-                      value={org.id?.toString() || 'unknown'} // Ensure we never pass empty string
+                      value={org.id?.toString() || 'unknown'}
                     >
                       {org.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full md:w-64">
+              <Select
+                value={selectedAssigner}
+                onValueChange={setSelectedAssigner}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Фильтр по постановщику" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все постановщики</SelectItem>
+                  {TASK_ASSIGNERS.map((assigner) => (
+                    <SelectItem 
+                      key={assigner} 
+                      value={assigner}
+                    >
+                      {assigner}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -302,6 +397,7 @@ const TaskList: React.FC<TaskListProps> = ({
                     const daysLeft = calculateDaysLeft(task.endDate);
                     const hasMultipleOrgs = task.moStatuses && task.moStatuses.length > 1;
                     const isExpanded = task.id && expandedTasks[task.id] || false;
+                    const isEditing = task.id === editingTaskId;
                     
                     return (
                       <React.Fragment key={task.id}>
@@ -329,10 +425,51 @@ const TaskList: React.FC<TaskListProps> = ({
                           <TableCell>{format(new Date(task.startDate), 'dd.MM.yyyy', { locale: ru })}</TableCell>
                           <TableCell>{format(new Date(task.endDate), 'dd.MM.yyyy', { locale: ru })}</TableCell>
                           <TableCell>
-                            <div className="flex items-center space-x-2">
-                              <Progress value={task.completionPercentage} className="h-2" />
-                              <span className="text-xs font-medium">{task.completionPercentage}%</span>
-                            </div>
+                            {isEditing ? (
+                              <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  value={editingTaskPercentage}
+                                  onChange={(e) => setEditingTaskPercentage(e.target.value)}
+                                  className="w-20"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <Button 
+                                  variant="outline" 
+                                  size="icon"
+                                  onClick={() => handleSaveTaskStatus(task)}
+                                  className="h-8 w-8"
+                                >
+                                  <CheckIcon size={16} />
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="icon"
+                                  onClick={resetEditingState}
+                                  className="h-8 w-8"
+                                >
+                                  <XIcon size={16} />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center space-x-2">
+                                <Progress value={task.completionPercentage} className="h-2" />
+                                <span className="text-xs font-medium">{task.completionPercentage}%</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditTask(task);
+                                  }}
+                                  className="h-6 w-6 ml-1"
+                                >
+                                  <Pencil size={12} />
+                                </Button>
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>{getStatusBadge(task)}</TableCell>
                           <TableCell>{task.assignedBy}</TableCell>
@@ -340,7 +477,10 @@ const TaskList: React.FC<TaskListProps> = ({
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleViewTaskDetails(task)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewTaskDetails(task);
+                              }}
                               title="Просмотреть детали"
                             >
                               <Eye size={16} />
@@ -351,7 +491,10 @@ const TaskList: React.FC<TaskListProps> = ({
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => onTaskEdit(task)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTaskEdit(task);
+                                  }}
                                   title="Редактировать"
                                 >
                                   <Pencil size={16} />
@@ -359,7 +502,10 @@ const TaskList: React.FC<TaskListProps> = ({
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => setTaskToDelete(task.id || null)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setTaskToDelete(task.id || null);
+                                  }}
                                   title="Удалить"
                                 >
                                   <Trash size={16} />
@@ -454,14 +600,14 @@ const TaskList: React.FC<TaskListProps> = ({
                                                   size="icon"
                                                   onClick={() => handleSave(task.id)}
                                                 >
-                                                  <Check size={16} />
+                                                  <CheckIcon size={16} />
                                                 </Button>
                                                 <Button 
                                                   variant="outline" 
                                                   size="icon"
                                                   onClick={resetEditingState}
                                                 >
-                                                  <X size={16} />
+                                                  <XIcon size={16} />
                                                 </Button>
                                               </div>
                                             ) : (

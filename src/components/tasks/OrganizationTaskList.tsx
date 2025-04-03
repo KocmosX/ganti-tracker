@@ -52,6 +52,17 @@ interface OrgTaskStats {
   completionPercent: number;
 }
 
+// Предопределенный список возможных постановщиков задач
+const TASK_ASSIGNERS = [
+  'Белугина Елена Владимировна',
+  'Никитенко Юлия Владимировна',
+  'Измайлова Наталья Викторовна',
+  'Миронова Наталья Владимировна',
+  'Бакулина Наталья Евгеньевна',
+  'Кноль Анна Сергеевна',
+  'Ковалева Наталья Викторовна',
+];
+
 const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   organizations,
   onTaskEdit,
@@ -69,7 +80,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [assignerFilter, setAssignerFilter] = useState<string>('all');
-  const [availableAssigners, setAvailableAssigners] = useState<string[]>([]);
 
   useEffect(() => {
     loadTasks();
@@ -78,12 +88,6 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   useEffect(() => {
     if (tasks.length && organizations.length) {
       calculateOrgTaskStats();
-      
-      // Extract unique task assigners
-      const assigners = Array.from(new Set(tasks.map(task => task.assignedBy)))
-        .filter(assigner => assigner) // Filter out undefined/null/empty
-        .sort();
-      setAvailableAssigners(assigners);
     }
   }, [tasks, organizations]);
 
@@ -273,7 +277,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                 <Search size={16} />
               </Button>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Select
                 value={filterType}
                 onValueChange={setFilterType}
@@ -299,7 +303,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все постановщики</SelectItem>
-                  {availableAssigners.map(assigner => (
+                  {TASK_ASSIGNERS.map(assigner => (
                     <SelectItem key={assigner} value={assigner}>
                       {assigner}
                     </SelectItem>
