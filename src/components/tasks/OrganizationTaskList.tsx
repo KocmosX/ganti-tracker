@@ -14,7 +14,8 @@ import {
 import { 
   MedicalOrganization, 
   Task, 
-  getAllTasks 
+  getAllTasks,
+  updateTaskMoStatus 
 } from '@/lib/db';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -26,11 +27,15 @@ import {
   ArrowUpDown, 
   BarChart4,
   Eye,
-  ExternalLink,
-  Pencil
+  Pencil,
+  Filter,
+  Check,
+  X
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import TaskDetailsModal from './TaskDetailsModal';
+import { useToast } from '@/hooks/use-toast';
+import { TASK_ASSIGNERS } from '@/lib/constants';
 
 interface OrganizationTaskListProps {
   organizations: MedicalOrganization[];
@@ -52,22 +57,12 @@ interface OrgTaskStats {
   completionPercent: number;
 }
 
-// Предопределенный список возможных постановщиков задач
-const TASK_ASSIGNERS = [
-  'Белугина Елена Владимировна',
-  'Никитенко Юлия Владимировна',
-  'Измайлова Наталья Викторовна',
-  'Миронова Наталья Владимировна',
-  'Бакулина Наталья Евгеньевна',
-  'Кноль Анна Сергеевна',
-  'Ковалева Наталья Викторовна',
-];
-
 const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   organizations,
   onTaskEdit,
   refreshTasks
 }) => {
+  const { toast } = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
@@ -80,6 +75,12 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [assignerFilter, setAssignerFilter] = useState<string>('all');
+  const [startDateFilter, setStartDateFilter] = useState<string>('');
+  const [endDateFilter, setEndDateFilter] = useState<string>('');
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editingMoId, setEditingMoId] = useState<number | null>(null);
+  const [editingPercentage, setEditingPercentage] = useState<string>('');
+  const [editingComment, setEditingComment] = useState<string>('');
 
   useEffect(() => {
     loadTasks();
@@ -93,7 +94,7 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
 
   useEffect(() => {
     applySorting();
-  }, [orgTaskStats, sortKey, sortDirection, searchTerm, filterType, showOnlyWithTasks, assignerFilter]);
+  }, [orgTaskStats, sortKey, sortDirection, searchTerm, filterType, showOnlyWithTasks, assignerFilter, startDateFilter, endDateFilter]);
 
   const loadTasks = async () => {
     try {
@@ -111,13 +112,24 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     organizations.forEach(org => {
       if (org.id === undefined) return;
 
-      // Filter tasks for this organization but also respect the assigner filter
+      // Фильтрация задач по организации
       let orgTasks = tasks.filter(task => {
         const isForThisOrg = task.moId === org.id || 
-                            (task.moStatuses && task.moStatuses.some(status => status.moId === org.id));
+                           (task.moStatuses && task.moStatuses.some(status => status.moId === org.id));
         
-        if (assignerFilter !== 'all') {
-          return isForThisOrg && task.assignedBy === assignerFilter;
+        // Фильтрация по постановщику
+        if (assignerFilter !== 'all' && task.assignedBy !== assignerFilter) {
+          return false;
+        }
+        
+        // Фильтрация по дате начала
+        if (startDateFilter && new Date(task.startDate) < new Date(startDateFilter)) {
+          return false;
+        }
+        
+        // Фильтрация по дате окончания
+        if (endDateFilter && new Date(task.endDate) > new Date(endDateFilter)) {
+          return false;
         }
         
         return isForThisOrg;
@@ -213,6 +225,8 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     setFilterType('all');
     setAssignerFilter('all');
     setShowOnlyWithTasks(false);
+    setStartDateFilter('');
+    setEndDateFilter('');
   };
 
   const getStatusBadge = (task: Task) => {
@@ -252,6 +266,57 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
     e.stopPropagation();
     onTaskEdit(task);
   };
+  
+  const handleEditStatus = (taskId: number, moId: number, percentage: number, comment: string = '') => {
+    setEditingTaskId(taskId);
+    setEditingMoId(moId);
+    setEditingPercentage(percentage.toString());
+    setEditingComment(comment || '');
+  };
+  
+  const handleSaveStatus = async () => {
+    if (!editingTaskId || !editingMoId) return;
+    
+    try {
+      const percentage = parseInt(editingPercentage);
+      if (isNaN(percentage) || percentage < 0 || percentage > 100) {
+        toast({
+          title: "Ошибка",
+          description: "Процент выполнения должен быть числом от 0 до 100",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      await updateTaskMoStatus(editingTaskId, editingMoId, {
+        completionPercentage: percentage,
+        comment: editingComment,
+        lastUpdated: new Date().toISOString()
+      });
+      
+      toast({
+        title: "Статус обновлен",
+        description: "Статус выполнения задачи успешно обновлен"
+      });
+      
+      resetEditingState();
+      loadTasks();
+    } catch (error) {
+      console.error('Ошибка при обновлении статуса:', error);
+      toast({
+        title: "Ошибка",
+        description: "Не удалось обновить статус задачи",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  const resetEditingState = () => {
+    setEditingTaskId(null);
+    setEditingMoId(null);
+    setEditingPercentage('');
+    setEditingComment('');
+  };
 
   return (
     <>
@@ -265,55 +330,82 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col md:flex-row gap-4 mb-4">
-            <div className="flex-1 flex items-center space-x-2">
-              <Input
-                placeholder="Поиск организаций..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="flex-1"
-              />
-              <Button variant="ghost" size="icon" onClick={() => setSearchTerm('')}>
-                <Search size={16} />
-              </Button>
+          <div className="flex flex-col gap-4 mb-4">
+            {/* Первая строка фильтров */}
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 flex items-center space-x-2">
+                <Input
+                  placeholder="Поиск организаций..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="flex-1"
+                />
+                <Button variant="ghost" size="icon" onClick={() => setSearchTerm('')}>
+                  <Search size={16} />
+                </Button>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Select
+                  value={filterType}
+                  onValueChange={setFilterType}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Тип организации" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все типы</SelectItem>
+                    <SelectItem value="ВПО">ВПО</SelectItem>
+                    <SelectItem value="ДПО">ДПО</SelectItem>
+                    <SelectItem value="КС">КС</SelectItem>
+                    <SelectItem value="КДЦ">КДЦ</SelectItem>
+                  </SelectContent>
+                </Select>
+                
+                <Select
+                  value={assignerFilter}
+                  onValueChange={setAssignerFilter}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Постановщик задачи" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все постановщики</SelectItem>
+                    {TASK_ASSIGNERS.map(assigner => (
+                      <SelectItem key={assigner} value={assigner}>
+                        {assigner}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              <Select
-                value={filterType}
-                onValueChange={setFilterType}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Тип организации" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все типы</SelectItem>
-                  <SelectItem value="ВПО">ВПО</SelectItem>
-                  <SelectItem value="ДПО">ДПО</SelectItem>
-                  <SelectItem value="КС">КС</SelectItem>
-                  <SelectItem value="КДЦ">КДЦ</SelectItem>
-                </SelectContent>
-              </Select>
+            
+            {/* Вторая строка фильтров */}
+            <div className="flex flex-col md:flex-row gap-4 items-end">
+              <div className="flex flex-col md:flex-row gap-4">
+                <div>
+                  <p className="text-sm mb-1">Дата начала (от)</p>
+                  <Input
+                    type="date"
+                    value={startDateFilter}
+                    onChange={(e) => setStartDateFilter(e.target.value)}
+                    className="w-full md:w-auto"
+                  />
+                </div>
+                <div>
+                  <p className="text-sm mb-1">Дата окончания (до)</p>
+                  <Input
+                    type="date"
+                    value={endDateFilter}
+                    onChange={(e) => setEndDateFilter(e.target.value)}
+                    className="w-full md:w-auto"
+                  />
+                </div>
+              </div>
               
-              <Select
-                value={assignerFilter}
-                onValueChange={setAssignerFilter}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Постановщик задачи" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все постановщики</SelectItem>
-                  {TASK_ASSIGNERS.map(assigner => (
-                    <SelectItem key={assigner} value={assigner}>
-                      {assigner}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
-              <Button variant="outline" onClick={resetFilters}>
+              <Button variant="outline" onClick={resetFilters} className="whitespace-nowrap">
                 <FilterX className="mr-2 h-4 w-4" />
-                Сбросить
+                Сбросить фильтры
               </Button>
             </div>
           </div>
@@ -481,6 +573,99 @@ const OrganizationTaskList: React.FC<OrganizationTaskListProps> = ({
                                     <div className="text-xs text-muted-foreground mt-2">
                                       Постановщик: {task.assignedBy || "Не указан"}
                                     </div>
+                                    
+                                    {/* Статус для данной организации */}
+                                    {task.moStatuses && task.moStatuses.find(status => status.moId === org.id) && (
+                                      <div className="mt-4 pt-2 border-t">
+                                        <div className="flex justify-between items-center">
+                                          <h6 className="text-xs font-semibold">Статус выполнения в организации:</h6>
+                                          {editingTaskId === task.id && editingMoId === org.id ? (
+                                            <div className="flex space-x-1">
+                                              <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                className="h-5 w-5" 
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleSaveStatus();
+                                                }}
+                                              >
+                                                <Check size={12} />
+                                              </Button>
+                                              <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                className="h-5 w-5"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  resetEditingState();
+                                                }}
+                                              >
+                                                <X size={12} />
+                                              </Button>
+                                            </div>
+                                          ) : (
+                                            <Button 
+                                              variant="ghost" 
+                                              size="sm" 
+                                              className="h-6 px-2 text-xs"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const moStatus = task.moStatuses?.find(status => status.moId === org.id);
+                                                if (moStatus && task.id) {
+                                                  handleEditStatus(task.id, org.id, moStatus.completionPercentage, moStatus.comment);
+                                                }
+                                              }}
+                                            >
+                                              Изменить
+                                            </Button>
+                                          )}
+                                        </div>
+                                        
+                                        {editingTaskId === task.id && editingMoId === org.id ? (
+                                          <div className="mt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                                            <div className="flex items-center space-x-2">
+                                              <span className="text-xs w-24">Процент выполнения:</span>
+                                              <Input
+                                                type="number"
+                                                min="0"
+                                                max="100"
+                                                value={editingPercentage}
+                                                onChange={(e) => setEditingPercentage(e.target.value)}
+                                                className="h-7 text-xs py-0"
+                                              />
+                                            </div>
+                                            <div>
+                                              <span className="text-xs">Комментарий:</span>
+                                              <Input
+                                                value={editingComment}
+                                                onChange={(e) => setEditingComment(e.target.value)}
+                                                className="mt-1 text-xs"
+                                                placeholder="Комментарий к статусу"
+                                              />
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <>
+                                            {task.moStatuses
+                                              .filter(status => status.moId === org.id)
+                                              .map(status => (
+                                                <div key={`${task.id}-${status.moId}`} className="mt-1">
+                                                  <div className="flex items-center space-x-2">
+                                                    <Progress value={status.completionPercentage} className="h-1.5 w-20" />
+                                                    <span className="text-xs">{status.completionPercentage}%</span>
+                                                  </div>
+                                                  {status.comment && (
+                                                    <div className="text-xs text-muted-foreground mt-1">
+                                                      {status.comment}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              ))}
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>

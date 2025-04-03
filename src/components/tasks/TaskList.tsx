@@ -5,8 +5,22 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Pencil, Trash, Plus, Search, FilterX, Eye, ChevronDown, ChevronUp, Edit, Check as CheckIcon, X as XIcon, ExternalLink } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { 
+  Pencil, 
+  Trash, 
+  Plus, 
+  Search, 
+  FilterX, 
+  Eye, 
+  ChevronDown, 
+  ChevronUp, 
+  Edit, 
+  Check as CheckIcon, 
+  X as XIcon,
+  Filter,
+  Calendar 
+} from 'lucide-react';
+import { format, differenceInDays, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Task, MedicalOrganization, getAllTasks, getMedicalOrganizationById, deleteTask, updateTaskMoStatus, updateTask } from '@/lib/db';
 import { useToast } from '@/hooks/use-toast';
@@ -16,6 +30,8 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth-context';
 import TaskDetailsModal from './TaskDetailsModal';
 import { Textarea } from '@/components/ui/textarea';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { TASK_ASSIGNERS, DATE_FORMAT_OPTIONS } from '@/lib/constants';
 
 interface TaskListProps {
   organizations: MedicalOrganization[];
@@ -24,17 +40,6 @@ interface TaskListProps {
   refreshTasks: boolean;
   showCompleted?: boolean;
 }
-
-// Предопределенный список возможных постановщиков задач
-const TASK_ASSIGNERS = [
-  'Белугина Елена Владимировна',
-  'Никитенко Юлия Владимировна',
-  'Измайлова Наталья Викторовна',
-  'Миронова Наталья Владимировна',
-  'Бакулина Наталья Евгеньевна',
-  'Кноль Анна Сергеевна',
-  'Ковалева Наталья Викторовна',
-];
 
 const TaskList: React.FC<TaskListProps> = ({ 
   organizations, 
@@ -60,6 +65,10 @@ const TaskList: React.FC<TaskListProps> = ({
   const [editingComment, setEditingComment] = useState<string>('');
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
   const [editingTaskPercentage, setEditingTaskPercentage] = useState<string>('');
+  const [startDateFilter, setStartDateFilter] = useState<string>('');
+  const [endDateFilter, setEndDateFilter] = useState<string>('');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
     loadTasks();
@@ -80,7 +89,7 @@ const TaskList: React.FC<TaskListProps> = ({
   useEffect(() => {
     filterTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, selectedMo, selectedAssigner, tasks, showCompleted]);
+  }, [searchTerm, selectedMo, selectedAssigner, tasks, showCompleted, startDateFilter, endDateFilter, priorityFilter]);
 
   const loadTasks = async () => {
     try {
@@ -106,6 +115,7 @@ const TaskList: React.FC<TaskListProps> = ({
       filtered = filtered.filter(task => task.completionPercentage < 100);
     }
 
+    // Filter by organization
     if (selectedMo && selectedMo !== 'all') {
       filtered = filtered.filter(task => {
         // Проверяем основную МО
@@ -120,10 +130,44 @@ const TaskList: React.FC<TaskListProps> = ({
       });
     }
 
+    // Filter by assigner
     if (selectedAssigner && selectedAssigner !== 'all') {
       filtered = filtered.filter(task => task.assignedBy === selectedAssigner);
     }
 
+    // Filter by date range
+    if (startDateFilter || endDateFilter) {
+      filtered = filtered.filter(task => {
+        const taskStart = new Date(task.startDate);
+        const taskEnd = new Date(task.endDate);
+        
+        if (startDateFilter && !endDateFilter) {
+          return taskStart >= new Date(startDateFilter) || 
+                taskEnd >= new Date(startDateFilter);
+        } 
+        
+        if (!startDateFilter && endDateFilter) {
+          return taskStart <= new Date(endDateFilter) ||
+                taskEnd <= new Date(endDateFilter);
+        }
+        
+        if (startDateFilter && endDateFilter) {
+          const filterStart = new Date(startDateFilter);
+          const filterEnd = new Date(endDateFilter);
+          
+          // Check if the task overlaps with the filter date range
+          return (
+            (taskStart >= filterStart && taskStart <= filterEnd) || // Task starts within range
+            (taskEnd >= filterStart && taskEnd <= filterEnd) ||     // Task ends within range
+            (taskStart <= filterStart && taskEnd >= filterEnd)      // Task spans the entire range
+          );
+        }
+        
+        return true;
+      });
+    }
+
+    // Filter by search term (title, description, etc.)
     if (searchTerm.trim()) {
       const lowerSearchTerm = searchTerm.toLowerCase();
       filtered = filtered.filter(task => 
@@ -163,6 +207,9 @@ const TaskList: React.FC<TaskListProps> = ({
     setSearchTerm('');
     setSelectedMo('all');
     setSelectedAssigner('all');
+    setStartDateFilter('');
+    setEndDateFilter('');
+    setPriorityFilter('all');
   };
 
   const calculateDaysLeft = (endDateStr: string) => {
@@ -310,64 +357,107 @@ const TaskList: React.FC<TaskListProps> = ({
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col md:flex-row gap-4 mb-4">
-            <div className="flex-1 flex items-center space-x-2">
-              <Input
-                placeholder="Поиск задач..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="flex-1"
-              />
-              <Button variant="ghost" size="icon" onClick={() => setSearchTerm('')}>
-                <Search size={16} />
-              </Button>
+          <div className="flex flex-col gap-4 mb-4">
+            {/* Основные фильтры */}
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 flex items-center space-x-2">
+                <Input
+                  placeholder="Поиск задач..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="flex-1"
+                />
+                <Button variant="ghost" size="icon" onClick={() => setSearchTerm('')}>
+                  <Search size={16} />
+                </Button>
+              </div>
+              
+              <div className="flex gap-2">
+                <Button 
+                  variant={showAdvancedFilters ? "secondary" : "outline"} 
+                  size="sm" 
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                >
+                  <Filter className="mr-2 h-4 w-4" />
+                  {showAdvancedFilters ? "Скрыть фильтры" : "Расширенный фильтр"}
+                </Button>
+                
+                <Button variant="outline" size="sm" onClick={resetFilters}>
+                  <FilterX className="mr-2 h-4 w-4" />
+                  Сбросить
+                </Button>
+              </div>
             </div>
-            <div className="w-full md:w-64">
-              <Select
-                value={selectedMo}
-                onValueChange={setSelectedMo}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Фильтр по организации" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все организации</SelectItem>
-                  {organizations.map((org) => (
-                    <SelectItem 
-                      key={org.id} 
-                      value={org.id?.toString() || 'unknown'}
-                    >
-                      {org.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="w-full md:w-64">
-              <Select
-                value={selectedAssigner}
-                onValueChange={setSelectedAssigner}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Фильтр по постановщику" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все постановщики</SelectItem>
-                  {TASK_ASSIGNERS.map((assigner) => (
-                    <SelectItem 
-                      key={assigner} 
-                      value={assigner}
-                    >
-                      {assigner}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button variant="outline" onClick={resetFilters}>
-              <FilterX className="mr-2 h-4 w-4" />
-              Сбросить фильтры
-            </Button>
+            
+            {/* Дополнительные фильтры */}
+            {showAdvancedFilters && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-muted/20 rounded-md">
+                <div>
+                  <label className="block text-sm mb-1">Организация</label>
+                  <Select
+                    value={selectedMo}
+                    onValueChange={setSelectedMo}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Фильтр по организации" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все организации</SelectItem>
+                      {organizations.map((org) => (
+                        <SelectItem 
+                          key={org.id} 
+                          value={org.id?.toString() || 'unknown'}
+                        >
+                          {org.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm mb-1">Постановщик</label>
+                  <Select
+                    value={selectedAssigner}
+                    onValueChange={setSelectedAssigner}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Фильтр по постановщику" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все постановщики</SelectItem>
+                      {TASK_ASSIGNERS.map((assigner) => (
+                        <SelectItem 
+                          key={assigner} 
+                          value={assigner}
+                        >
+                          {assigner}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="flex flex-col space-y-4">
+                  <div>
+                    <label className="block text-sm mb-1">Период с:</label>
+                    <Input
+                      type="date"
+                      value={startDateFilter}
+                      onChange={(e) => setStartDateFilter(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1">Период по:</label>
+                    <Input
+                      type="date"
+                      value={endDateFilter}
+                      onChange={(e) => setEndDateFilter(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="rounded-md border">
@@ -422,8 +512,8 @@ const TaskList: React.FC<TaskListProps> = ({
                               organizationNames[task.moId] || 'Неизвестно'
                             )}
                           </TableCell>
-                          <TableCell>{format(new Date(task.startDate), 'dd.MM.yyyy', { locale: ru })}</TableCell>
-                          <TableCell>{format(new Date(task.endDate), 'dd.MM.yyyy', { locale: ru })}</TableCell>
+                          <TableCell>{format(new Date(task.startDate), DATE_FORMAT_OPTIONS.SHORT_DATE, { locale: ru })}</TableCell>
+                          <TableCell>{format(new Date(task.endDate), DATE_FORMAT_OPTIONS.SHORT_DATE, { locale: ru })}</TableCell>
                           <TableCell>
                             {isEditing ? (
                               <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
